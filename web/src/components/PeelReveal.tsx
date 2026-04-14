@@ -44,6 +44,7 @@ const LINES = [
   "Our librarian looked up from her novel, saw your work, and said \"oh my.\" She never says that.",
   "The weather in Reykjavík is perfect today and we are choosing to credit you personally.",
   "We sent a paper balloon up with your name on it. Children pointed. Adults nodded. You are the balloon now.",
+  "Good job. Claude is proud of you ❤️",
 ];
 
 interface Props {
