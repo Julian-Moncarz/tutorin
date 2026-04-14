@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import FeedbackButton from '@/components/FeedbackButton';
 
 export const metadata: Metadata = {
   title: 'Tutorin',
@@ -15,7 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        {children}
+        <FeedbackButton />
+      </body>
     </html>
   );
 }
