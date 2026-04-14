@@ -1,0 +1,19 @@
+{
+  "skill": "Explain how row operations affect the determinant and why",
+  "correct": false,
+  "timestamp": "2026-04-13T01:51:23.855Z",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "## Problem\n\nSuppose $A$ is a $4 \\times 4$ matrix with $\\det(A) = 7$.\n\nYou perform the following sequence of row operations on $A$ to produce a new matrix $B$:\n\n1. Swap rows $R_1$ and $R_3$.\n2. Replace $R_2$ with $R_2 + 5R_4$.\n3. Multiply $R_4$ by $-2$.\n\n**(a)** What is $\\det(B)$?\n\n**(b)** For each of the three operations, briefly explain *why* it has the effect on the determinant that it does."
+    },
+    {
+      "role": "user",
+      "content": "test 12345"
+    },
+    {
+      "role": "assistant",
+      "content": "It looks like you sent a test message rather than an attempt at the problem. Whenever you're ready, go ahead and work through parts (a) and (b) — even a rough attempt is fine, and I'll give you feedback from there.\n\nAs a quick reminder, the three operations are:\n1. Swap $R_1 \\leftrightarrow R_3$\n2. $R_2 \\to R_2 + 5R_4$\n3. $R_4 \\to -2 R_4$\n\nStarting from $\\det(A) = 7$, track what each operation does to the determinant in turn."
+    }
+  ]
+}

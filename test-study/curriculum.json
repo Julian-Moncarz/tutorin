@@ -1,0 +1,22 @@
+{
+  "test": "MATH 223 Midterm - Linear Algebra",
+  "topics": [
+    {
+      "topic": "Determinants",
+      "skills": [
+        "Compute the determinant of a 2x2 matrix",
+        "Compute the determinant of a 3x3 matrix using cofactor expansion",
+        "Explain how row operations affect the determinant and why"
+      ]
+    },
+    {
+      "topic": "Eigenvalues & Eigenvectors",
+      "skills": [
+        "Explain geometrically what eigenvalues and eigenvectors represent",
+        "Compute eigenvalues of a 2x2 or 3x3 matrix",
+        "Find eigenvectors given eigenvalues",
+        "Diagonalize a matrix or explain why it cannot be diagonalized"
+      ]
+    }
+  ]
+}

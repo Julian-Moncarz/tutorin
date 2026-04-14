@@ -1,0 +1,716 @@
+'use client';
+
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import TextareaAutosize from 'react-textarea-autosize';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import MotivationPopup from '@/components/MotivationPopup';
+import PeelReveal from '@/components/PeelReveal';
+import { ChatMessage, Curriculum, Progress } from '@/lib/types';
+import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch } from '@/lib/chatStream';
+
+function isCorrectMessage(text: string): boolean {
+  return text.trimStart().startsWith('✅');
+}
+
+function masteredFractionForTopic(
+  curriculum: Curriculum,
+  progress: Progress,
+  topicName: string
+): number {
+  const topic = curriculum.topics.find((t) => t.topic === topicName);
+  if (!topic || topic.skills.length === 0) return 0;
+  const mastered = topic.skills.filter((s) => {
+    const correct = (progress[s]?.attempts || []).filter((a) => a.correct).length;
+    return correct >= 3;
+  }).length;
+  return mastered / topic.skills.length;
+}
+
+interface PeelState {
+  correct: boolean;
+  topicName: string;
+  fractionBefore: number;
+  fractionAfter: number;
+  pf: PrefetchState | null;
+}
+
+let messageIdCounter = 0;
+interface DisplayMessage extends ChatMessage {
+  id: number;
+}
+
+interface PrefetchState {
+  nextSkill: string | null;
+  nextTopic: string | null;
+  text: string;
+  completed: boolean;
+  failed: boolean;
+  allDone: boolean;
+  controller: AbortController;
+  onEvent: ((s: PrefetchState) => void) | null;
+}
+
+function Dots() {
+  return (
+    <div className="flex gap-1.5 py-1">
+      <div className="w-1.5 h-1.5 bg-charcoal-muted thinking-dot" />
+      <div className="w-1.5 h-1.5 bg-charcoal-muted thinking-dot" />
+      <div className="w-1.5 h-1.5 bg-charcoal-muted thinking-dot" />
+    </div>
+  );
+}
+
+function ProblemMarkdown({ children, dim = false }: { children: string; dim?: boolean }) {
+  return (
+    <div
+      className={`prose-chat prose-problem text-[17px] leading-[1.7] ${
+        dim ? 'text-charcoal-secondary/75' : 'text-charcoal'
+      }`}
+    >
+      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function TutorMarkdown({ children }: { children: string }) {
+  return (
+    <div className="prose-chat text-[16px] leading-[1.7] text-charcoal">
+      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+export default function ExercisePage() {
+  const router = useRouter();
+  const [skill, setSkill] = useState<string | null>(null);
+  const [topic, setTopic] = useState<string | null>(null);
+  const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
+  const [peel, setPeel] = useState<PeelState | null>(null);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [streamingText, setStreamingText] = useState<string>('');
+  const [answer, setAnswer] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
+  const [allDone, setAllDone] = useState(false);
+  const [leftPct, setLeftPct] = useState(42);
+  const [focusMode, setFocusMode] = useState(false);
+  const draggingRef = useRef(false);
+  const answerRef = useRef<HTMLTextAreaElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const prefetchRef = useRef<PrefetchState | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    prefetchRef.current?.controller.abort();
+  }, []);
+
+  // Load curriculum once for topic→fraction computations
+  useEffect(() => {
+    fetch('/api/curriculum')
+      .then((r) => r.json())
+      .then((c) => { if (!c.error) setCurriculum(c); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const pct = (e.clientX / window.innerWidth) * 100;
+      setLeftPct(Math.max(20, Math.min(65, pct)));
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const Divider = () => (
+    <div
+      onMouseDown={startDrag}
+      className="flex-shrink-0 w-px bg-cream-border/40 hover:bg-cream-border relative cursor-col-resize group transition-colors"
+    >
+      <div className="absolute inset-y-0 -left-2 -right-2" />
+    </div>
+  );
+
+  const submitted = messages.filter((m) => m.role === 'user').length > 0;
+
+  useEffect(() => {
+    if (submitted && !loading) chatInputRef.current?.focus();
+  }, [submitted, loading, messages.length]);
+
+  useEffect(() => {
+    if (!submitted) return;
+    const last = messages[messages.length - 1];
+    if (last?.role === 'user') {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [messages, submitted]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        if (submitted) {
+          e.preventDefault();
+          setFocusMode((v) => !v);
+        }
+      } else if (mod && (e.key === 'j' || e.key === 'J')) {
+        if (submitted) {
+          e.preventDefault();
+          handleNext();
+        }
+      } else if (e.key === 'Escape' && focusMode) {
+        setFocusMode(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, focusMode, messages, skill, loading]);
+
+  const doChat = useCallback(async (currentSkill: string, msgs: DisplayMessage[]): Promise<string> => {
+    setLoading(true);
+    setStreamingText('');
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const plainMsgs: ChatMessage[] = msgs.map(({ role, content }) => ({ role, content }));
+      const fullText = await streamChat(
+        currentSkill,
+        plainMsgs,
+        (text) => setStreamingText(text),
+        controller.signal
+      );
+      if (fullText) {
+        setMessages((prev) => [
+          ...prev,
+          { id: ++messageIdCounter, role: 'assistant', content: fullText },
+        ]);
+      }
+      return fullText;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return '';
+      console.error('Chat error:', error);
+      setMessages((prev) => [
+        ...prev,
+        { id: ++messageIdCounter, role: 'assistant', content: 'Something went wrong. Try again.' },
+      ]);
+      return '';
+    } finally {
+      setStreamingText('');
+      setLoading(false);
+    }
+  }, []);
+
+  const consumeFirstPrefetch = useCallback((pf: QuestionPrefetch, topicName: string | null) => {
+    setSkill(pf.skill);
+    if (topicName) setTopic(topicName);
+    setInitializing(false);
+    const finish = (s: QuestionPrefetch) => {
+      if (s.failed || !s.text) {
+        setStreamingText('');
+        doChat(s.skill, []).then(() => answerRef.current?.focus());
+        return;
+      }
+      setStreamingText('');
+      setMessages([{ id: ++messageIdCounter, role: 'assistant', content: s.text }]);
+      setLoading(false);
+      answerRef.current?.focus();
+    };
+    if (pf.completed) {
+      finish(pf);
+      return;
+    }
+    setLoading(true);
+    setStreamingText(pf.text);
+    pf.onEvent = (s) => {
+      if (s.completed) finish(s);
+      else setStreamingText(s.text);
+    };
+  }, [doChat]);
+
+  const loadNextSkill = useCallback(async () => {
+    setInitializing(true);
+    setMessages([]);
+    setAnswer('');
+    setChatInput('');
+    setStreamingText('');
+    try {
+      const res = await fetch('/api/next-skill');
+      const data = await res.json();
+      if (data.done) {
+        setAllDone(true);
+        setInitializing(false);
+        return;
+      }
+      const pf = takeFirstQuestionPrefetch(data.skill);
+      if (pf) {
+        consumeFirstPrefetch(pf, data.topic);
+        return;
+      }
+      setSkill(data.skill);
+      setTopic(data.topic);
+      setInitializing(false);
+      await doChat(data.skill, []);
+      answerRef.current?.focus();
+    } catch (error) {
+      console.error('Failed to load skill:', error);
+      setInitializing(false);
+    }
+  }, [doChat, consumeFirstPrefetch]);
+
+  useEffect(() => {
+    loadNextSkill();
+  }, [loadNextSkill]);
+
+  const problem = messages.find((m) => m.role === 'assistant')?.content || '';
+  const firstAnswer = messages.find((m) => m.role === 'user')?.content || '';
+  const feedbackMessages = (() => {
+    let sawUser = false;
+    return messages.filter((m) => {
+      if (!sawUser) {
+        if (m.role === 'user') sawUser = true;
+        return false;
+      }
+      return true;
+    });
+  })();
+
+  const startPrefetch = useCallback(async (
+    assessMessages: ChatMessage[],
+    currentSkill: string,
+    correct: boolean
+  ) => {
+    if (prefetchRef.current) return;
+    const controller = new AbortController();
+    const state: PrefetchState = {
+      nextSkill: null,
+      nextTopic: null,
+      text: '',
+      completed: false,
+      failed: false,
+      allDone: false,
+      controller,
+      onEvent: null,
+    };
+    prefetchRef.current = state;
+    const emit = () => state.onEvent?.(state);
+    try {
+      await fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skill: currentSkill, correct, messages: assessMessages }),
+        signal: controller.signal,
+      });
+      const nextRes = await fetch('/api/next-skill', { signal: controller.signal });
+      const nextData = await nextRes.json();
+      if (nextData.done) {
+        state.allDone = true;
+        state.completed = true;
+        emit();
+        return;
+      }
+      state.nextSkill = nextData.skill;
+      state.nextTopic = nextData.topic ?? null;
+      emit();
+      const full = await streamChat(
+        nextData.skill,
+        [],
+        (t) => { state.text = t; emit(); },
+        controller.signal
+      );
+      state.text = full;
+      state.completed = true;
+      emit();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      console.error('Prefetch error:', err);
+      state.failed = true;
+      state.completed = true;
+      emit();
+    }
+  }, []);
+
+  const submitAnswer = async () => {
+    if (!answer.trim() || !skill || loading) return;
+    const currentSkill = skill;
+    const userMessage: DisplayMessage = {
+      id: ++messageIdCounter,
+      role: 'user',
+      content: answer.trim(),
+    };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setAnswer('');
+    const tutorText = await doChat(currentSkill, newMessages);
+    if (tutorText) {
+      const assessMessages: ChatMessage[] = [
+        ...newMessages.map(({ role, content }) => ({ role, content })),
+        { role: 'assistant', content: tutorText },
+      ];
+      const correct = isCorrectMessage(tutorText);
+      startPrefetch(assessMessages, currentSkill, correct);
+    }
+  };
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || !skill || loading) return;
+    const userMessage: DisplayMessage = {
+      id: ++messageIdCounter,
+      role: 'user',
+      content: chatInput.trim(),
+    };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setChatInput('');
+    requestAnimationFrame(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+    await doChat(skill, newMessages);
+  };
+
+  const consumePrefetch = useCallback((pf: PrefetchState | null) => {
+    if (!pf) {
+      loadNextSkill();
+      return;
+    }
+    prefetchRef.current = null;
+    abortRef.current?.abort();
+    setMessages([]);
+    setAnswer('');
+    setChatInput('');
+    setStreamingText('');
+    setInitializing(true);
+
+    const apply = (s: PrefetchState) => {
+      if (s.allDone) {
+        setAllDone(true);
+        setInitializing(false);
+        setLoading(false);
+        return;
+      }
+      if (s.failed && !s.nextSkill) {
+        loadNextSkill();
+        return;
+      }
+      if (!s.nextSkill) return;
+      setSkill(s.nextSkill);
+      if (s.nextTopic) setTopic(s.nextTopic);
+      setInitializing(false);
+      if (s.completed) {
+        if (s.failed || !s.text) {
+          setStreamingText('');
+          doChat(s.nextSkill, []).then(() => answerRef.current?.focus());
+        } else {
+          setStreamingText('');
+          setMessages([{ id: ++messageIdCounter, role: 'assistant', content: s.text }]);
+          setLoading(false);
+          answerRef.current?.focus();
+        }
+      } else {
+        setStreamingText(s.text);
+        setLoading(true);
+      }
+    };
+    pf.onEvent = apply;
+    apply(pf);
+  }, [loadNextSkill, doChat]);
+
+  const handleNext = async () => {
+    if (!skill || !topic || loading) return;
+
+    // Derive correctness from last assistant message
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const correct = lastAssistant ? isCorrectMessage(lastAssistant.content) : false;
+
+    let pf = prefetchRef.current;
+
+    // If no prefetch (e.g. user clicked Next before a prefetch trigger), fire the
+    // progress save + next-skill fetch now using the derived correctness.
+    if (!pf) {
+      const plainMsgs: ChatMessage[] = messages.map(({ role, content }) => ({ role, content }));
+      startPrefetch(plainMsgs, skill, correct);
+      pf = prefetchRef.current;
+    }
+
+    // Compute fractions for the peel bar animation
+    let fractionBefore = 0;
+    let fractionAfter = 0;
+    if (curriculum) {
+      try {
+        // fractionAfter is based on server state right now (prefetch already POSTed progress)
+        const progressRes = await fetch('/api/progress');
+        const progressData: Progress = await progressRes.json();
+        fractionAfter = masteredFractionForTopic(curriculum, progressData, topic);
+        // Reverse-derive fractionBefore: if the just-attempted skill flipped to mastered,
+        // subtract one skill-slot from the topic total.
+        const topicDef = curriculum.topics.find((t) => t.topic === topic);
+        if (topicDef) {
+          const afterCorrect = (progressData[skill]?.attempts || []).filter((a) => a.correct).length;
+          const justMastered = correct && afterCorrect === 3;
+          fractionBefore = justMastered
+            ? Math.max(0, fractionAfter - 1 / topicDef.skills.length)
+            : fractionAfter;
+        } else {
+          fractionBefore = fractionAfter;
+        }
+      } catch (err) {
+        console.error('Failed to compute topic progress:', err);
+      }
+    }
+
+    setPeel({ correct, topicName: topic, fractionBefore, fractionAfter, pf });
+  };
+
+  const onPeelRevealed = useCallback(() => {
+    const p = peel;
+    setPeel(null);
+    consumePrefetch(p?.pf ?? null);
+  }, [peel, consumePrefetch]);
+
+  const HomeButton = () => (
+    <button
+      onClick={() => router.push('/')}
+      className="fixed top-4 left-4 z-10 text-charcoal-muted hover:text-charcoal transition-colors text-[13px] px-2 py-1"
+    >
+      &larr; Home
+    </button>
+  );
+
+  if (allDone) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="text-center max-w-sm">
+          <h1 className="text-2xl font-bold text-charcoal mb-4">All skills mastered</h1>
+          <button
+            onClick={() => router.push('/')}
+            className="mt-2 text-charcoal-muted text-sm hover:text-charcoal transition-colors"
+          >
+            &larr; Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // PHASE 1 — answer the problem
+  if (!submitted) {
+    const showProblem = problem || streamingText;
+    const hasContent = answer.trim().length > 0;
+
+    const onAnswerKey = (e: React.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        submitAnswer();
+      }
+    };
+
+    return (
+      <div className="h-screen flex flex-col">
+        <MotivationPopup />
+        <HomeButton />
+        <div className="flex-1 flex min-h-0">
+          <div
+            style={{ width: `${leftPct}%` }}
+            className="overflow-y-auto px-10 pt-24 pb-10"
+          >
+            <div className="max-w-[460px] ml-auto">
+              {initializing || (loading && !showProblem) ? (
+                <Dots />
+              ) : (
+                <ProblemMarkdown>{showProblem}</ProblemMarkdown>
+              )}
+            </div>
+          </div>
+          <Divider />
+          <div
+            style={{ width: `${100 - leftPct}%` }}
+            className="flex flex-col px-10 pt-24 pb-6 min-h-0"
+          >
+            <textarea
+              ref={answerRef}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              onKeyDown={onAnswerKey}
+              placeholder="Start with part (a)…"
+              autoFocus
+              className="flex-1 w-full bg-transparent text-[16px] text-charcoal leading-[1.7] resize-none focus:outline-none placeholder:text-charcoal-muted/40 min-h-[65vh]"
+            />
+            <div className="flex items-center justify-end gap-4 pt-4">
+              <span
+                className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
+                  hasContent ? 'opacity-100' : 'opacity-0'
+                }`}
+              >
+                ⌘ + ↵
+              </span>
+              <button
+                onClick={submitAnswer}
+                disabled={!hasContent}
+                className={`px-6 py-2.5 text-[14px] font-semibold transition-all active:scale-[0.98] ${
+                  hasContent
+                    ? 'bg-green text-white hover:bg-green-hover shadow-sm hover:shadow'
+                    : 'border border-cream-border text-charcoal-muted/50 cursor-not-allowed'
+                }`}
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+        {peel && (
+          <PeelReveal
+            correct={peel.correct}
+            topicName={peel.topicName}
+            fractionBefore={peel.fractionBefore}
+            fractionAfter={peel.fractionAfter}
+            onRevealed={onPeelRevealed}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // PHASE 2 — feedback + chat
+  return (
+    <div className="h-screen flex flex-col">
+      <MotivationPopup />
+      <HomeButton />
+      <div className="flex-1 flex min-h-0">
+        {/* LEFT — archive (hidden in focus mode) */}
+        {!focusMode && (
+          <>
+            <div
+              style={{ width: `${leftPct}%` }}
+              className="overflow-y-auto px-10 pt-24 pb-10"
+            >
+              <div className="max-w-[460px] ml-auto space-y-8">
+                <ProblemMarkdown dim>{problem}</ProblemMarkdown>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-charcoal-muted/70 font-medium mb-3">
+                    Your answer
+                  </p>
+                  <div className="border-l-2 border-green/40 pl-4">
+                    <p className="text-[15px] text-charcoal-secondary leading-[1.7] whitespace-pre-wrap">
+                      {firstAnswer}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Divider />
+          </>
+        )}
+
+        {/* RIGHT — tutor + chat */}
+        <div
+          style={{ width: focusMode ? '100%' : `${100 - leftPct}%` }}
+          className="flex flex-col min-h-0 relative"
+        >
+          {/* Top bar — focus toggle + Next */}
+          <div className="absolute top-4 right-6 z-10 flex items-center gap-3">
+            <button
+              onClick={() => setFocusMode((v) => !v)}
+              className="flex items-center gap-2 text-[13px] text-charcoal-muted hover:text-charcoal transition-colors px-2 py-1"
+            >
+              <span>{focusMode ? '⤢ Exit focus' : '⤢ Focus'}</span>
+              <span className="text-[11px] text-charcoal-muted/60 tabular-nums">⌘ + ⇧ + F</span>
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-2 text-[13px] font-semibold bg-green text-white hover:bg-green-hover transition-all active:scale-[0.98] shadow-sm hover:shadow disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <span>Next →</span>
+              <span className="text-[11px] text-white/70 tabular-nums">⌘ + J</span>
+            </button>
+          </div>
+
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-10 pt-24 pb-6">
+            <div className="max-w-2xl mx-auto space-y-7">
+              {feedbackMessages.map((msg) =>
+                msg.role === 'assistant' ? (
+                  <div key={msg.id} className="animate-fade-up">
+                    <TutorMarkdown>{msg.content}</TutorMarkdown>
+                  </div>
+                ) : (
+                  <div key={msg.id} className="animate-fade-up flex justify-end">
+                    <p className="max-w-[80%] text-[15px] text-charcoal-secondary leading-[1.65] whitespace-pre-wrap bg-cream-raised/70 px-4 py-2.5 rounded-sm">
+                      {msg.content}
+                    </p>
+                  </div>
+                )
+              )}
+              {streamingText && (
+                <div className="animate-fade-up">
+                  <TutorMarkdown>{streamingText}</TutorMarkdown>
+                </div>
+              )}
+              {loading && !streamingText && <Dots />}
+              <div ref={chatBottomRef} />
+            </div>
+          </div>
+
+          <div className="flex-shrink-0 px-10 pb-6">
+            <div className="max-w-2xl mx-auto">
+              <div className="border-t border-cream-border/60 pt-4">
+                <TextareaAutosize
+                  ref={chatInputRef}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
+                  minRows={3}
+                  maxRows={8}
+                  placeholder="Ask a question or think out loud…"
+                  className="w-full bg-transparent text-[15px] text-charcoal placeholder:text-charcoal-muted/45 resize-none focus:outline-none disabled:opacity-40 leading-relaxed"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {peel && (
+        <PeelReveal
+          correct={peel.correct}
+          topicName={peel.topicName}
+          fractionBefore={peel.fractionBefore}
+          fractionAfter={peel.fractionAfter}
+          onRevealed={onPeelRevealed}
+        />
+      )}
+    </div>
+  );
+}

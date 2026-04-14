@@ -1,0 +1,26 @@
+{
+  "Compute the determinant of a 2x2 matrix": {
+    "attempts": [
+      {
+        "timestamp": "2026-04-10T23:40:10.336Z",
+        "correct": true
+      }
+    ]
+  },
+  "Compute the determinant of a 3x3 matrix using cofactor expansion": {
+    "attempts": [
+      {
+        "timestamp": "2026-04-13T01:50:01.546Z",
+        "correct": false
+      }
+    ]
+  },
+  "Explain how row operations affect the determinant and why": {
+    "attempts": [
+      {
+        "timestamp": "2026-04-13T01:51:23.854Z",
+        "correct": false
+      }
+    ]
+  }
+}

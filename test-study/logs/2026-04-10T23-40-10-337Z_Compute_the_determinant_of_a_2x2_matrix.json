@@ -1,0 +1,27 @@
+{
+  "skill": "Compute the determinant of a 2x2 matrix",
+  "correct": true,
+  "timestamp": "2026-04-10T23:40:10.337Z",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "\n\nHere's your problem:\n\n---\n\n**Problem.** Let $A = \\begin{pmatrix} 5 & -3 \\\\ 2 & 4 \\end{pmatrix}$. Compute $\\det(A)$.\n\n---\n\nShow your work using the formula."
+    },
+    {
+      "role": "user",
+      "content": "det(A) = (5)(4) - (-3)(2) = 20 - (-6) = 26"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n**Step-level:** Your work is correct at every step.\n\n- You identified $a = 5$, $b = -3$, $c = 2$, $d = 4$ and applied $\\det(A) = ad - bc$.\n- You computed $ad = (5)(4) = 20$ ✓\n- You computed $bc = (-3)(2) = -6$ ✓\n- You correctly handled the double negative: $20 - (-6) = 20 + 6 = 26$ ✓\n\n**Process-level:** You set up the formula cleanly and didn't skip the intermediate step of writing out $-(-6)$, which is exactly where sign errors tend to creep in. Keeping that step visible is a solid habit.\n\n**Self-regulation:** The double negative ($- (-6)$) is the single most common place students lose points on determinant problems. You handled it here — make sure you stay just as careful when it's buried inside a larger cofactor expansion on the test.\n\n---\n\n**Elaborative question:** If you swap the two rows of $A$ to get $A' = \\begin{pmatrix} 2 & 4 \\\\ 5 & -3 \\end{pmatrix}$, what is $\\det(A')$ and why?"
+    },
+    {
+      "role": "user",
+      "content": "Swapping the two rows of A negates the determinant, so det(A') = -26. This is because each row swap multiplies the determinant by -1."
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n**Step-level:** Correct. $\\det(A') = (2)(-3) - (4)(5) = -6 - 20 = -26$, and your answer matches.\n\n**Process-level:** You went straight to the property instead of recomputing from scratch — that's exactly the kind of reasoning the professor tests. The question \"what happens to det when you do [row operation]?\" is a recurring exam theme, and you answered it the way he wants: state the rule, apply it.\n\n**Self-regulation:** You gave both the result and the justification in one clean sentence. On the exam, that's full marks. Keep pairing the property with the conclusion like that.\n\n---\n\nYou've got the 2×2 determinant down solid — formula, sign handling, and the row-swap property. Ready to move on to the next skill?"
+    }
+  ]
+}
