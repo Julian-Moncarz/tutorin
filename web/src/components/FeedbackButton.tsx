@@ -342,11 +342,11 @@ export default function FeedbackButton() {
       const copied = await copyToClipboard(promptText);
       setPrCopied(copied);
       const clipboardNote = copied
-        ? '📋 Copied a **PR prompt** to your clipboard.'
-        : '⚠️ Couldn\'t access your clipboard — use the **Copy** button below.';
+        ? '📋 **Copied a prompt to your clipboard.**'
+        : '⚠️ Couldn\'t access your clipboard — copy the prompt below.';
       const intro =
         `**Comment delivered →** [#${filedIssue.number}](${filedIssue.url})\n\n` +
-        `${clipboardNote} Paste it into \`claude\` in \`${REPO_ROOT}\` and a fresh session will open a PR for you.\n\n` +
+        `${clipboardNote} Paste it into Claude Code in \`${REPO_ROOT}\` — it will modify the app to match your feedback and open a PR for you.\n\n` +
         '```\n' + promptText + '\n```';
       setMessages((prev) => [
         ...prev,

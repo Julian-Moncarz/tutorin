@@ -20,6 +20,12 @@ export async function POST(req: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    // Always lead with a "Desired outcome" heading so future readers (and the
+    // PR-writing Claude session) can find the wanted outcome at a glance.
+    const trimmed = String(body).trim();
+    const finalBody = /^##\s*desired\s+outcome/i.test(trimmed)
+      ? trimmed
+      : `## Desired outcome\n\n${trimmed}`;
     const { stdout } = await pExec(
       'gh',
       [
@@ -29,7 +35,7 @@ export async function POST(req: NextRequest) {
         '--repo',
         UPSTREAM_REPO,
         '--body',
-        body,
+        finalBody,
       ],
       { maxBuffer: 4 * 1024 * 1024, cwd: getRepoRoot() }
     );
