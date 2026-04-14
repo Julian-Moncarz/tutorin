@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import MotivationPopup from '@/components/MotivationPopup';
 import PeelReveal from '@/components/PeelReveal';
@@ -70,7 +71,7 @@ function ProblemMarkdown({ children, dim = false }: { children: string; dim?: bo
         dim ? 'text-charcoal-secondary/75' : 'text-charcoal'
       }`}
     >
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
         {children}
       </ReactMarkdown>
     </div>
@@ -80,7 +81,7 @@ function ProblemMarkdown({ children, dim = false }: { children: string; dim?: bo
 function TutorMarkdown({ children }: { children: string }) {
   return (
     <div className="prose-chat text-[16px] leading-[1.7] text-charcoal">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
         {children}
       </ReactMarkdown>
     </div>
