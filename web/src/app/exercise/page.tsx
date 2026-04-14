@@ -11,6 +11,7 @@ import MotivationPopup from '@/components/MotivationPopup';
 import PeelReveal from '@/components/PeelReveal';
 import { ChatMessage, Curriculum, Progress } from '@/lib/types';
 import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch } from '@/lib/chatStream';
+import { playCorrectChime } from '@/lib/audio';
 
 function isCorrectMessage(text: string): boolean {
   return text.trimStart().startsWith('✅');
@@ -204,10 +205,17 @@ export default function ExercisePage() {
     abortRef.current = controller;
     try {
       const plainMsgs: ChatMessage[] = msgs.map(({ role, content }) => ({ role, content }));
+      let chimed = false;
       const fullText = await streamChat(
         currentSkill,
         plainMsgs,
-        (text) => setStreamingText(text),
+        (text) => {
+          setStreamingText(text);
+          if (!chimed && isCorrectMessage(text)) {
+            chimed = true;
+            playCorrectChime();
+          }
+        },
         controller.signal
       );
       if (fullText) {

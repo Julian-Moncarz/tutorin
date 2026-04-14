@@ -101,6 +101,43 @@ body {
   color: #3d3832;
 }
 
+/* Tables (GFM) — apply to both chat and problem prose */
+.prose-chat table,
+.prose-problem table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+  font-size: 0.95em;
+}
+
+.prose-chat th,
+.prose-chat td,
+.prose-problem th,
+.prose-problem td {
+  border: 1px solid #d6cfc2;
+  padding: 0.5em 0.75em;
+  text-align: left;
+  vertical-align: top;
+  min-height: 1.6em;
+}
+
+.prose-chat th,
+.prose-problem th {
+  background: #ede7dd;
+  font-weight: 600;
+}
+
+.prose-chat tbody tr:nth-child(even) td,
+.prose-problem tbody tr:nth-child(even) td {
+  background: #f5efe4;
+}
+
+/* Ensure empty fill-in cells still render with visible height */
+.prose-chat td:empty::after,
+.prose-problem td:empty::after {
+  content: '\00a0';
+}
+
 /* Thinking dots */
 @keyframes pulse-dot {
   0%, 80%, 100% { opacity: 0.2; }

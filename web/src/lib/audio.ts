@@ -18,6 +18,94 @@ function noiseBuffer(ac: AudioContext, duration: number): AudioBuffer {
   return buffer;
 }
 
+// Bright two-note chime when ✅ appears in the tutor's reply.
+// Quick, celebratory, ~350ms. Designed to sit above speech/text, not dominate.
+export function playCorrectChime(): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+
+  // Two ascending notes: E6 then B6 (a rising fifth)
+  const notes: [number, number][] = [
+    [1318.51, 0.0],  // E6
+    [1975.53, 0.09], // B6
+  ];
+
+  notes.forEach(([freq, delay]) => {
+    const o = ac.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = freq;
+    const g = ac.createGain();
+    const t0 = now + delay;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.08, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
+    o.connect(g).connect(ac.destination);
+    o.start(t0);
+    o.stop(t0 + 0.3);
+  });
+
+  // Soft sparkle: high sine burst at the very start
+  const sparkle = ac.createOscillator();
+  sparkle.type = 'sine';
+  sparkle.frequency.setValueAtTime(2637, now);
+  sparkle.frequency.exponentialRampToValueAtTime(3950, now + 0.08);
+  const sparkleGain = ac.createGain();
+  sparkleGain.gain.setValueAtTime(0, now);
+  sparkleGain.gain.linearRampToValueAtTime(0.04, now + 0.01);
+  sparkleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+  sparkle.connect(sparkleGain).connect(ac.destination);
+  sparkle.start(now);
+  sparkle.stop(now + 0.14);
+}
+
+// Rising pitch sweep synced to the bar fill animation (~900ms).
+// Bigger jump on correct → starts higher, louder. Small nudge on wrong → softer.
+export function playBarRise(correct: boolean): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+  const duration = correct ? 0.9 : 0.45;
+  const peakGain = correct ? 0.09 : 0.045;
+  const startFreq = correct ? 440 : 520;
+  const endFreq = correct ? 880 : 660;
+
+  const o = ac.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(startFreq, now);
+  o.frequency.exponentialRampToValueAtTime(endFreq, now + duration);
+
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(peakGain, now + 0.1);
+  g.gain.linearRampToValueAtTime(peakGain * 0.7, now + duration * 0.75);
+  g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  // Slight lowpass to keep it soft, not piercing
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2200;
+
+  o.connect(lp).connect(g).connect(ac.destination);
+  o.start(now);
+  o.stop(now + duration + 0.02);
+
+  if (correct) {
+    // Add a perfect fifth harmonic, quieter, for body
+    const h = ac.createOscillator();
+    h.type = 'sine';
+    h.frequency.setValueAtTime(startFreq * 1.5, now);
+    h.frequency.exponentialRampToValueAtTime(endFreq * 1.5, now + duration);
+    const hg = ac.createGain();
+    hg.gain.setValueAtTime(0, now);
+    hg.gain.linearRampToValueAtTime(peakGain * 0.5, now + 0.12);
+    hg.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    h.connect(hg).connect(ac.destination);
+    h.start(now);
+    h.stop(now + duration + 0.02);
+  }
+}
+
 export function playPeel(correct: boolean): void {
   const ac = getCtx();
   if (!ac) return;

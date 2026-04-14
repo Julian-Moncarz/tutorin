@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { playPeel } from '@/lib/audio';
+import { playPeel, playBarRise } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -72,9 +72,12 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setBarWidth(targetFraction), 180);
+    const t = setTimeout(() => {
+      setBarWidth(targetFraction);
+      playBarRise(correct);
+    }, 180);
     return () => clearTimeout(t);
-  }, [targetFraction]);
+  }, [targetFraction, correct]);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
