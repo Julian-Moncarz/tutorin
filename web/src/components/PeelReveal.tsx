@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { playPeel, playBarRise } from '@/lib/audio';
+import { playPeel, playBarRise, playTier1Complete, playTier2Complete, playTier3Complete } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -68,17 +68,47 @@ export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [committed, setCommitted] = useState(false);
+  // Which tier just completed? 0 = none, 1/2/3 = celebrate that tier.
+  const [celebrate, setCelebrate] = useState<0 | 1 | 2 | 3>(0);
   const pointerStartX = useRef(0);
   const pointerId = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
+  // Which tier (if any) just completed this peel. Only on correct (the wrong-
+  // nudge can asymptotically approach but never equal 1, so this is safe).
+  const completedTier: 0 | 1 | 2 | 3 = correct
+    ? tiersBefore.tier3 < 1 && tiersAfter.tier3 >= 1
+      ? 3
+      : tiersBefore.tier2 < 1 && tiersAfter.tier2 >= 1
+      ? 2
+      : tiersBefore.tier1 < 1 && tiersAfter.tier1 >= 1
+      ? 1
+      : 0
+    : 0;
+
   useEffect(() => {
-    const t = setTimeout(() => {
+    // 180ms: bar starts filling + bar-rise sweep plays (~0.9s on correct).
+    const t1 = setTimeout(() => {
       setTiers(tiersAfter);
       playBarRise(correct);
     }, 180);
-    return () => clearTimeout(t);
-  }, [tiersAfter, correct]);
+
+    // ~1250ms: bar fill + bar-rise sound are finished. NOW celebrate.
+    let t2: ReturnType<typeof setTimeout> | null = null;
+    if (completedTier > 0) {
+      t2 = setTimeout(() => {
+        setCelebrate(completedTier);
+        if (completedTier === 1) playTier1Complete();
+        else if (completedTier === 2) playTier2Complete();
+        else if (completedTier === 3) playTier3Complete();
+      }, 1250);
+    }
+
+    return () => {
+      clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+    };
+  }, [tiersAfter, correct, completedTier]);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
@@ -159,6 +189,38 @@ export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter
           if (Math.abs(dragX) < 4) commit();
         }}
       >
+        {/* Tier-3 full-screen radial glow + petals, behind the content */}
+        {celebrate === 3 && (
+          <>
+            <div className="celebrate-radial" />
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              {Array.from({ length: 36 }).map((_, i) => {
+                const left = (i / 36) * 100 + (Math.random() - 0.5) * 3;
+                const dx = (Math.random() - 0.5) * 280;
+                const spin = `${(Math.random() - 0.5) * 720}deg`;
+                const life = 4 + Math.random() * 3;
+                const delay = Math.random() * 2.5;
+                const palette = ['#f9a8d4', '#fbcfe8', '#f472b6', '#fde68a', '#fef3c7', '#fbbf24'];
+                const color = palette[i % palette.length];
+                return (
+                  <span
+                    key={i}
+                    className="celebrate-petal"
+                    style={{
+                      left: `${left}%`,
+                      top: '0%',
+                      background: color,
+                      ['--dx' as string]: `${dx}px`,
+                      ['--spin' as string]: spin,
+                      ['--life' as string]: `${life}s`,
+                      ['--delay' as string]: `${delay}s`,
+                    } as React.CSSProperties}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
         <div className="h-full w-full flex flex-col items-center justify-center px-6">
           <div className="w-full max-w-md flex flex-col items-center">
             <p className="text-[10px] uppercase tracking-[0.18em] text-charcoal-muted mb-4">
@@ -166,7 +228,9 @@ export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter
             </p>
 
             <div
-              className="w-full mb-10 rounded-full"
+              className={`relative w-full mb-10 rounded-full ${
+                celebrate === 3 ? 'celebrate-border-shimmer' : ''
+              }`}
               style={{
                 padding: `${tiers.tier3 * 6}px`,
                 background:
@@ -180,7 +244,11 @@ export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter
                 transition: 'all 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
-              <div className="relative h-5 bg-cream-dark/50 rounded-full overflow-hidden">
+              <div
+                className={`relative h-5 bg-cream-dark/50 rounded-full overflow-hidden ${
+                  celebrate > 0 ? 'celebrate-pop' : ''
+                }`}
+              >
                 <div
                   className="absolute inset-y-0 left-0 rounded-full bg-green"
                   style={{
@@ -196,7 +264,47 @@ export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter
                     transition: 'width 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 />
+                {celebrate > 0 && (
+                  <div
+                    className={`celebrate-sheen ${
+                      celebrate === 1 ? 't1' : celebrate === 2 ? 't2' : 't3'
+                    }`}
+                  />
+                )}
               </div>
+
+              {/* Sparkle burst around the bar (tiers 2 and 3) */}
+              {celebrate >= 2 && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {Array.from({ length: celebrate === 3 ? 24 : 14 }).map((_, i) => {
+                    const angle = (Math.PI * 2 * i) / (celebrate === 3 ? 24 : 14);
+                    const distance = 120 + Math.random() * 140;
+                    const px = Math.cos(angle) * distance;
+                    const py = Math.sin(angle) * distance;
+                    const life = 1.2 + Math.random() * (celebrate === 3 ? 2.8 : 1.2);
+                    const delay = Math.random() * (celebrate === 3 ? 1.8 : 0.6);
+                    const color = celebrate === 3
+                      ? ['#f9a8d4', '#fbcfe8', '#f472b6', '#fde68a', '#fef3c7'][i % 5]
+                      : ['#fbbf24', '#f59e0b', '#fde68a'][i % 3];
+                    return (
+                      <span
+                        key={i}
+                        className="celebrate-particle"
+                        style={{
+                          left: '50%',
+                          top: '50%',
+                          color,
+                          background: color,
+                          ['--px' as string]: `${px}px`,
+                          ['--py' as string]: `${py}px`,
+                          ['--life' as string]: `${life}s`,
+                          ['--delay' as string]: `${delay}s`,
+                        } as React.CSSProperties}
+                      />
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <p className="text-center text-[17px] text-charcoal leading-relaxed max-w-sm">

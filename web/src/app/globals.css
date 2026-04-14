@@ -168,3 +168,87 @@ body {
 .animate-fade-up {
   animation: fade-up 0.25s ease-out;
 }
+
+/* ───── Tier-complete celebrations ───── */
+
+/* Sheen that sweeps across a filled bar */
+@keyframes sheen-sweep {
+  0%   { transform: translateX(-120%) skewX(-20deg); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateX(120%) skewX(-20deg); opacity: 0; }
+}
+.celebrate-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0.85) 50%, rgba(255,255,255,0) 70%, transparent 100%);
+  mix-blend-mode: screen;
+}
+.celebrate-sheen.t1 { animation: sheen-sweep 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both; }
+.celebrate-sheen.t2 { animation: sheen-sweep 2.2s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both; }
+.celebrate-sheen.t3 { animation: sheen-sweep 3.4s cubic-bezier(0.22, 1, 0.36, 1) 0.8s both; }
+
+/* Bar pop — a quick squish-stretch the instant it fills */
+@keyframes bar-pop {
+  0%   { transform: scaleY(1) scaleX(1); }
+  25%  { transform: scaleY(1.7) scaleX(1.01); }
+  60%  { transform: scaleY(0.95) scaleX(1); }
+  100% { transform: scaleY(1) scaleX(1); }
+}
+.celebrate-pop { animation: bar-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both; transform-origin: center; }
+
+/* Particle burst — sparkles radiating from the bar */
+@keyframes particle-fly {
+  0%   { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  15%  { opacity: 1; }
+  100% { transform: translate(var(--px), var(--py)) scale(0.2); opacity: 0; }
+}
+.celebrate-particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: particle-fly var(--life, 1.2s) cubic-bezier(0.22, 1, 0.36, 1) var(--delay, 0s) both;
+  box-shadow: 0 0 12px currentColor;
+}
+
+/* Full-screen radial glow pulse (tier 3) */
+@keyframes radial-pulse {
+  0%   { opacity: 0; transform: scale(0.5); }
+  25%  { opacity: 1; transform: scale(1); }
+  60%  { opacity: 0.75; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+.celebrate-radial {
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, rgba(251, 207, 232, 0.55) 0%, rgba(244, 114, 182, 0.25) 30%, rgba(244, 114, 182, 0) 60%);
+  animation: radial-pulse 5.5s cubic-bezier(0.22, 1, 0.36, 1) 0.5s both;
+}
+
+/* Border shimmer — a rotating hue sweep for tier 3 */
+@keyframes border-shimmer {
+  0%   { filter: hue-rotate(0deg) brightness(1); }
+  50%  { filter: hue-rotate(40deg) brightness(1.35); }
+  100% { filter: hue-rotate(0deg) brightness(1); }
+}
+.celebrate-border-shimmer { animation: border-shimmer 2.5s ease-in-out 1s infinite; }
+
+/* Petal / confetti for tier 3 */
+@keyframes petal-fall {
+  0%   { transform: translate(0, -20vh) rotate(0deg); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translate(var(--dx), 110vh) rotate(var(--spin)); opacity: 0; }
+}
+.celebrate-petal {
+  position: absolute;
+  width: 10px;
+  height: 14px;
+  border-radius: 40% 60% 45% 55% / 50% 45% 55% 50%;
+  pointer-events: none;
+  animation: petal-fall var(--life, 5s) linear var(--delay, 0s) both;
+  box-shadow: 0 0 6px rgba(244,114,182,0.4);
+}

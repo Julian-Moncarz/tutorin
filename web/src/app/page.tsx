@@ -84,11 +84,6 @@ export default function Dashboard() {
         {curriculum.test}
       </h1>
 
-      {/* Progress — just the count, per-topic bars live below */}
-      <p className="mt-5 text-[12px] text-charcoal-muted tabular-nums">
-        {mastered} of {total} mastered
-      </p>
-
       {/* Next up + CTA */}
       <div className="mt-12">
         {nextUp && (
@@ -117,12 +112,17 @@ export default function Dashboard() {
         </p>
         <div className="space-y-6">
           {curriculum.topics.map((topic) => {
-            const topicMastered = topic.skills.filter(
-              (s) => getSkillStatusClient(s, progress) === 'mastered'
-            ).length;
-            const topicPct = topic.skills.length
-              ? (topicMastered / topic.skills.length) * 100
-              : 0;
+            const N = topic.skills.length || 1;
+            let t1c = 0, t2c = 0, t3c = 0;
+            for (const s of topic.skills) {
+              const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
+              if (c >= 1) t1c++;
+              if (c >= 2) t2c++;
+              if (c >= 3) t3c++;
+            }
+            const tier1 = t1c / N;
+            const tier2 = t2c / N;
+            const tier3 = t3c / N;
             return (
               <div key={topic.topic}>
                 <div className="flex items-baseline justify-between mb-2">
@@ -130,14 +130,41 @@ export default function Dashboard() {
                     {topic.topic}
                   </h2>
                   <span className="text-[11px] text-charcoal-muted/60 tabular-nums">
-                    {topicMastered}/{topic.skills.length}
+                    {t3c}/{topic.skills.length}
                   </span>
                 </div>
-                <div className="h-[3px] bg-cream-overlay overflow-hidden rounded-full mb-3">
-                  <div
-                    className="h-full bg-green progress-fill rounded-full"
-                    style={{ width: `${topicPct}%` }}
-                  />
+                <div
+                  className="relative w-full mb-3 rounded-full"
+                  style={{
+                    padding: `${tier3 * 4}px`,
+                    background:
+                      tier3 > 0
+                        ? 'linear-gradient(90deg, #f9a8d4, #fbcfe8, #f472b6, #fbcfe8, #f9a8d4)'
+                        : 'transparent',
+                    boxShadow:
+                      tier3 > 0
+                        ? `0 0 ${6 + tier3 * 14}px rgba(244,114,182,${0.15 + tier3 * 0.3})`
+                        : 'none',
+                    transition: 'all 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                >
+                  <div className="relative h-3 bg-cream-overlay rounded-full overflow-hidden">
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-green"
+                      style={{
+                        width: `${tier1 * 100}%`,
+                        transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+                      }}
+                    />
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full"
+                      style={{
+                        width: `${tier2 * 100}%`,
+                        background: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
+                        transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+                      }}
+                    />
+                  </div>
                 </div>
                 <ul className="space-y-1.5">
                   {topic.skills.map((skill) => {
