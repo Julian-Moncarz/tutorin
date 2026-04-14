@@ -83,7 +83,7 @@ Tell the student:
 ```
 Your curriculum is ready! To start learning:
 
-cd ~/Research-Reports/tutorin/web
+cd ~/tutorin/web
 STUDY_DIR="<current folder path>" npm run dev
 
 Then open http://localhost:3000
