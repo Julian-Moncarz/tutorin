@@ -47,37 +47,38 @@ const LINES = [
   "Good job. Claude is proud of you ❤️",
 ];
 
+interface Tiers {
+  tier1: number;
+  tier2: number;
+  tier3: number;
+}
+
 interface Props {
   correct: boolean;
   topicName: string;
-  fractionBefore: number; // 0..1 mastered fraction in topic before this attempt
-  fractionAfter: number;  // 0..1 after
+  tiersBefore: Tiers;
+  tiersAfter: Tiers;
   onRevealed: () => void;
 }
 
-export default function PeelReveal({ correct, topicName, fractionBefore, fractionAfter, onRevealed }: Props) {
+export default function PeelReveal({ correct, topicName, tiersBefore, tiersAfter, onRevealed }: Props) {
   const [line] = useState(() => LINES[Math.floor(Math.random() * LINES.length)]);
 
-  // On wrong, nudge the bar by a small fraction of the remaining gap to mastery
-  const targetFraction = correct
-    ? fractionAfter
-    : Math.min(1, fractionBefore + Math.max(0.015, (1 - fractionBefore) * 0.04));
-
-  const [barWidth, setBarWidth] = useState(fractionBefore);
-  const [dragY, setDragY] = useState(0);
+  const [tiers, setTiers] = useState<Tiers>(tiersBefore);
+  const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [committed, setCommitted] = useState(false);
-  const pointerStartY = useRef(0);
+  const pointerStartX = useRef(0);
   const pointerId = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      setBarWidth(targetFraction);
+      setTiers(tiersAfter);
       playBarRise(correct);
     }, 180);
     return () => clearTimeout(t);
-  }, [targetFraction, correct]);
+  }, [tiersAfter, correct]);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
@@ -91,7 +92,7 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (committed) return;
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowUp') {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         commit();
       }
@@ -102,7 +103,7 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (committed) return;
-    pointerStartY.current = e.clientY;
+    pointerStartX.current = e.clientX;
     pointerId.current = e.pointerId;
     setDragging(true);
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
@@ -110,33 +111,33 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging || committed) return;
-    const dy = Math.min(0, e.clientY - pointerStartY.current);
-    setDragY(dy);
+    const dx = Math.min(0, e.clientX - pointerStartX.current);
+    setDragX(dx);
   };
 
   const onPointerUp = () => {
     if (!dragging) return;
     setDragging(false);
     pointerId.current = null;
-    if (dragY < -90) {
+    if (dragX < -90) {
       commit();
     } else {
-      setDragY(0);
+      setDragX(0);
     }
   };
 
-  const rotate = dragY * 0.02;
+  const rotate = dragX * 0.02;
   const cardStyle: React.CSSProperties = committed
     ? {
-        transform: 'translateY(-110vh) rotate(-4deg)',
+        transform: 'translateX(-110vw) rotate(-4deg)',
         transition: 'transform 520ms cubic-bezier(0.5, 0.1, 0.25, 1)',
       }
     : {
-        transform: `translateY(${dragY}px) rotate(${rotate}deg)`,
+        transform: `translateX(${dragX}px) rotate(${rotate}deg)`,
         transition: dragging ? 'none' : 'transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1)',
       };
 
-  const dragProgress = Math.min(1, -dragY / 90);
+  const dragProgress = Math.min(1, -dragX / 90);
   const cornerLift = 18 + dragProgress * 40;
 
   return (
@@ -146,7 +147,7 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
         className="absolute inset-0 bg-cream cursor-grab active:cursor-grabbing select-none"
         style={{
           ...cardStyle,
-          boxShadow: '0 -20px 60px rgba(0,0,0,0.12), 0 -4px 12px rgba(0,0,0,0.06)',
+          boxShadow: '-20px 0 60px rgba(0,0,0,0.12), -4px 0 12px rgba(0,0,0,0.06)',
           willChange: 'transform',
         }}
         onPointerDown={onPointerDown}
@@ -155,7 +156,7 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
         onPointerCancel={onPointerUp}
         onClick={(e) => {
           if (committed) return;
-          if (Math.abs(dragY) < 4) commit();
+          if (Math.abs(dragX) < 4) commit();
         }}
       >
         <div className="h-full w-full flex flex-col items-center justify-center px-6">
@@ -164,14 +165,38 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
               {topicName}
             </p>
 
-            <div className="w-full h-1.5 bg-cream-dark/50 rounded-full overflow-hidden mb-10">
-              <div
-                className="h-full bg-green rounded-full"
-                style={{
-                  width: `${barWidth * 100}%`,
-                  transition: 'width 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
-              />
+            <div
+              className="w-full mb-10 rounded-full"
+              style={{
+                padding: `${tiers.tier3 * 6}px`,
+                background:
+                  tiers.tier3 > 0
+                    ? 'linear-gradient(90deg, #f9a8d4, #fbcfe8, #f472b6, #fbcfe8, #f9a8d4)'
+                    : 'transparent',
+                boxShadow:
+                  tiers.tier3 > 0
+                    ? `0 0 ${8 + tiers.tier3 * 22}px rgba(244,114,182,${0.2 + tiers.tier3 * 0.4})`
+                    : 'none',
+                transition: 'all 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
+              <div className="relative h-5 bg-cream-dark/50 rounded-full overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-green"
+                  style={{
+                    width: `${tiers.tier1 * 100}%`,
+                    transition: 'width 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                />
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: `${tiers.tier2 * 100}%`,
+                    background: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
+                    transition: 'width 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                />
+              </div>
             </div>
 
             <p className="text-center text-[17px] text-charcoal leading-relaxed max-w-sm">
@@ -179,14 +204,17 @@ export default function PeelReveal({ correct, topicName, fractionBefore, fractio
             </p>
           </div>
 
-          <div className="absolute bottom-12 left-0 right-0 flex flex-col items-center pointer-events-none">
+          <div className="absolute right-8 top-0 bottom-0 flex flex-row items-center gap-2 pointer-events-none">
+            <div className="h-10 w-1 bg-charcoal-muted/30 rounded-full" />
             <div
-              className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted/70 mb-2"
-              style={{ opacity: 1 - dragProgress * 0.8 }}
+              className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted/70"
+              style={{
+                opacity: 1 - dragProgress * 0.8,
+                writingMode: 'vertical-rl',
+              }}
             >
-              pull up to continue
+              swipe left to continue
             </div>
-            <div className="w-10 h-1 bg-charcoal-muted/30 rounded-full" />
           </div>
         </div>
 

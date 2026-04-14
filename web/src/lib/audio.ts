@@ -18,45 +18,58 @@ function noiseBuffer(ac: AudioContext, duration: number): AudioBuffer {
   return buffer;
 }
 
-// Bright two-note chime when ✅ appears in the tutor's reply.
-// Quick, celebratory, ~350ms. Designed to sit above speech/text, not dominate.
+// Warm major-triad arpeggio when ✅ appears in the tutor's reply.
+// Sine waves through a gentle lowpass, ~900ms total. Nice, not piercing.
 export function playCorrectChime(): void {
   const ac = getCtx();
   if (!ac) return;
   const now = ac.currentTime;
 
-  // Two ascending notes: E6 then B6 (a rising fifth)
+  // C major triad ascending: C5, E5, G5, C6
   const notes: [number, number][] = [
-    [1318.51, 0.0],  // E6
-    [1975.53, 0.09], // B6
+    [523.25, 0.0],
+    [659.25, 0.1],
+    [783.99, 0.2],
+    [1046.5, 0.32],
   ];
 
-  notes.forEach(([freq, delay]) => {
+  // Shared soft lowpass keeps the tone mellow
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 3200;
+  lp.Q.value = 0.6;
+  lp.connect(ac.destination);
+
+  notes.forEach(([freq, delay], i) => {
     const o = ac.createOscillator();
-    o.type = 'triangle';
+    o.type = 'sine';
     o.frequency.value = freq;
+
+    // A quieter triangle partial an octave up for a touch of shimmer
+    const p = ac.createOscillator();
+    p.type = 'triangle';
+    p.frequency.value = freq * 2;
+
     const g = ac.createGain();
     const t0 = now + delay;
+    const peak = 0.11 - i * 0.012; // slightly softer as we ascend
     g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(0.08, t0 + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
-    o.connect(g).connect(ac.destination);
-    o.start(t0);
-    o.stop(t0 + 0.3);
-  });
+    g.gain.linearRampToValueAtTime(peak, t0 + 0.025);
+    g.gain.linearRampToValueAtTime(peak * 0.55, t0 + 0.18);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
 
-  // Soft sparkle: high sine burst at the very start
-  const sparkle = ac.createOscillator();
-  sparkle.type = 'sine';
-  sparkle.frequency.setValueAtTime(2637, now);
-  sparkle.frequency.exponentialRampToValueAtTime(3950, now + 0.08);
-  const sparkleGain = ac.createGain();
-  sparkleGain.gain.setValueAtTime(0, now);
-  sparkleGain.gain.linearRampToValueAtTime(0.04, now + 0.01);
-  sparkleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-  sparkle.connect(sparkleGain).connect(ac.destination);
-  sparkle.start(now);
-  sparkle.stop(now + 0.14);
+    const pg = ac.createGain();
+    pg.gain.setValueAtTime(0, t0);
+    pg.gain.linearRampToValueAtTime(peak * 0.18, t0 + 0.03);
+    pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
+
+    o.connect(g).connect(lp);
+    p.connect(pg).connect(lp);
+    o.start(t0);
+    p.start(t0);
+    o.stop(t0 + 0.65);
+    p.stop(t0 + 0.45);
+  });
 }
 
 // Rising pitch sweep synced to the bar fill animation (~900ms).
@@ -154,21 +167,4 @@ export function playPeel(correct: boolean): void {
   snap.start(now + 0.4);
   snap.stop(now + 0.52);
 
-  // 4. Bright major-chord overtone ONLY on correct
-  if (correct) {
-    const chord = [659.25, 830.61, 987.77]; // E5, G#5, B5 — E major
-    chord.forEach((freq, i) => {
-      const o = ac.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = freq;
-      const g = ac.createGain();
-      const start = now + 0.42 + i * 0.025;
-      g.gain.setValueAtTime(0, start);
-      g.gain.linearRampToValueAtTime(0.09, start + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, start + 0.32);
-      o.connect(g).connect(ac.destination);
-      o.start(start);
-      o.stop(start + 0.34);
-    });
-  }
 }

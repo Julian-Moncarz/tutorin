@@ -17,25 +17,35 @@ function isCorrectMessage(text: string): boolean {
   return text.trimStart().startsWith('✅');
 }
 
-function masteredFractionForTopic(
+interface Tiers {
+  tier1: number; // fraction of skills with ≥1 correct
+  tier2: number; // ≥2 correct
+  tier3: number; // ≥3 correct (mastered)
+}
+
+function tieredFractionsForTopic(
   curriculum: Curriculum,
   progress: Progress,
   topicName: string
-): number {
+): Tiers {
   const topic = curriculum.topics.find((t) => t.topic === topicName);
-  if (!topic || topic.skills.length === 0) return 0;
-  const mastered = topic.skills.filter((s) => {
-    const correct = (progress[s]?.attempts || []).filter((a) => a.correct).length;
-    return correct >= 3;
-  }).length;
-  return mastered / topic.skills.length;
+  if (!topic || topic.skills.length === 0) return { tier1: 0, tier2: 0, tier3: 0 };
+  const N = topic.skills.length;
+  let t1 = 0, t2 = 0, t3 = 0;
+  for (const s of topic.skills) {
+    const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
+    if (c >= 1) t1++;
+    if (c >= 2) t2++;
+    if (c >= 3) t3++;
+  }
+  return { tier1: t1 / N, tier2: t2 / N, tier3: t3 / N };
 }
 
 interface PeelState {
   correct: boolean;
   topicName: string;
-  fractionBefore: number;
-  fractionAfter: number;
+  tiersBefore: Tiers;
+  tiersAfter: Tiers;
   pf: PrefetchState | null;
 }
 
@@ -470,40 +480,51 @@ export default function ExercisePage() {
       pf = prefetchRef.current;
     }
 
-    // Compute fractions for the peel bar animation
-    let fractionBefore = 0;
-    let fractionAfter = 0;
+    // Compute tiered fractions for the peel bar animation
+    let tiersAfter: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
+    let tiersBefore: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
     if (curriculum) {
       try {
-        // fractionAfter is based on server state right now (prefetch already POSTed progress)
         const progressRes = await fetch('/api/progress');
         const progressData: Progress = await progressRes.json();
-        fractionAfter = masteredFractionForTopic(curriculum, progressData, topic);
-        // Reverse-derive fractionBefore: if the just-attempted skill flipped to mastered,
-        // subtract one skill-slot from the topic total.
+        tiersAfter = tieredFractionsForTopic(curriculum, progressData, topic);
         const topicDef = curriculum.topics.find((t) => t.topic === topic);
-        if (topicDef) {
+        if (topicDef && correct) {
+          // Reverse-derive: a single correct answer bumps exactly one tier by 1/N
           const afterCorrect = (progressData[skill]?.attempts || []).filter((a) => a.correct).length;
-          const justMastered = correct && afterCorrect === 3;
-          fractionBefore = justMastered
-            ? Math.max(0, fractionAfter - 1 / topicDef.skills.length)
-            : fractionAfter;
+          const step = 1 / topicDef.skills.length;
+          tiersBefore = { ...tiersAfter };
+          if (afterCorrect === 1) tiersBefore.tier1 = Math.max(0, tiersAfter.tier1 - step);
+          else if (afterCorrect === 2) tiersBefore.tier2 = Math.max(0, tiersAfter.tier2 - step);
+          else if (afterCorrect === 3) tiersBefore.tier3 = Math.max(0, tiersAfter.tier3 - step);
+        } else if (topicDef) {
+          // Wrong: visual-only teaser. Nudge the tier that *would* have moved by 33% of 1/N.
+          tiersBefore = tiersAfter;
+          const currentCorrect = (progressData[skill]?.attempts || []).filter((a) => a.correct).length;
+          const step = 1 / topicDef.skills.length;
+          const nudge = step * 0.33;
+          const nudged = { ...tiersAfter };
+          if (currentCorrect === 0) nudged.tier1 = Math.min(1, tiersAfter.tier1 + nudge);
+          else if (currentCorrect === 1) nudged.tier2 = Math.min(1, tiersAfter.tier2 + nudge);
+          else if (currentCorrect === 2) nudged.tier3 = Math.min(1, tiersAfter.tier3 + nudge);
+          tiersAfter = nudged;
         } else {
-          fractionBefore = fractionAfter;
+          tiersBefore = tiersAfter;
         }
       } catch (err) {
         console.error('Failed to compute topic progress:', err);
       }
     }
 
-    setPeel({ correct, topicName: topic, fractionBefore, fractionAfter, pf });
+    setPeel({ correct, topicName: topic, tiersBefore, tiersAfter, pf });
+    // Swap the page underneath to the next problem immediately, so when the peel
+    // animates away the new problem is already rendered beneath.
+    consumePrefetch(pf);
   };
 
   const onPeelRevealed = useCallback(() => {
-    const p = peel;
     setPeel(null);
-    consumePrefetch(p?.pf ?? null);
-  }, [peel, consumePrefetch]);
+  }, []);
 
   const HomeButton = () => (
     <button
@@ -599,8 +620,8 @@ export default function ExercisePage() {
           <PeelReveal
             correct={peel.correct}
             topicName={peel.topicName}
-            fractionBefore={peel.fractionBefore}
-            fractionAfter={peel.fractionAfter}
+            tiersBefore={peel.tiersBefore}
+            tiersAfter={peel.tiersAfter}
             onRevealed={onPeelRevealed}
           />
         )}
@@ -696,7 +717,7 @@ export default function ExercisePage() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                       e.preventDefault();
                       sendChat();
                     }
@@ -706,6 +727,15 @@ export default function ExercisePage() {
                   placeholder="Ask a question or think out loud…"
                   className="w-full bg-transparent text-[15px] text-charcoal placeholder:text-charcoal-muted/45 resize-none focus:outline-none disabled:opacity-40 leading-relaxed"
                 />
+                <div className="flex items-center justify-end pt-2">
+                  <span
+                    className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
+                      chatInput.trim() ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  >
+                    ⌘ + ↵
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -715,8 +745,8 @@ export default function ExercisePage() {
         <PeelReveal
           correct={peel.correct}
           topicName={peel.topicName}
-          fractionBefore={peel.fractionBefore}
-          fractionAfter={peel.fractionAfter}
+          tiersBefore={peel.tiersBefore}
+          tiersAfter={peel.tiersAfter}
           onRevealed={onPeelRevealed}
         />
       )}
