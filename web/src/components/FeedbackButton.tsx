@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import remarkMath from 'remark-math';
@@ -79,54 +80,72 @@ function FeedbackMarkdown({ children }: { children: string }) {
 }
 
 /**
- * The button itself: 56px circle, cream, heavy shadow, centered green icon,
- * "FEEDBACK" warped around the top arc in green. Lives top-most (z-[100]).
+ * 56px cream circle with centered green chat-spark icon, plus a bold green
+ * caption "tinker / improve this app!" to the right. Bounces on dashboard
+ * mount (parent toggles `bouncing`). Lives top-most (z-[100]).
  */
-function FeedbackPill({ onClick }: { onClick: () => void }) {
+function FeedbackPill({ onClick, bouncing }: { onClick: () => void; bouncing?: boolean }) {
   return (
-    <button
-      onClick={onClick}
-      aria-label="Feedback"
-      title="Feedback (⌘/)"
-      className="fixed bottom-6 left-6 z-[100] w-14 h-14 rounded-full bg-cream border border-cream-border hover:-translate-y-0.5 active:translate-y-0 transition-transform"
-      style={{
-        boxShadow:
-          '0 6px 18px rgba(0,0,0,0.14), 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
-      }}
+    <div
+      className={`fixed bottom-6 left-6 z-[100] flex items-center gap-3 ${
+        bouncing ? 'animate-feedback-bounce' : ''
+      }`}
     >
-      <svg viewBox="0 0 56 56" width="56" height="56" className="block">
-        <defs>
-          {/* Circular path for the warped FEEDBACK text — top arc, left→right */}
-          <path id="fb-arc" d="M 9,28 A 19,19 0 0 1 47,28" fill="none" />
-        </defs>
-        <text
-          className="fill-green"
+      <button
+        onClick={onClick}
+        aria-label="Tinker / improve this app"
+        title="Tinker / improve this app (⌘/ · ⌘⇧/ fullscreen)"
+        className="relative w-14 h-14 rounded-full bg-cream border border-cream-border hover:-translate-y-0.5 active:translate-y-0 transition-transform"
+        style={{
+          boxShadow:
+            '0 6px 18px rgba(0,0,0,0.14), 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
+        }}
+      >
+        <svg viewBox="0 0 56 56" width="56" height="56" className="block">
+          <g transform="translate(28,28)" className="text-green">
+            <path
+              d="M -11 -6 Q -11 -12 -5 -12 L 5 -12 Q 11 -12 11 -6 L 11 2 Q 11 8 5 8 L -2 8 L -7 12 L -6 8 Q -11 7 -11 2 Z"
+              fill="currentColor"
+            />
+          </g>
+        </svg>
+        <span
+          aria-hidden
+          className="absolute -top-1.5 -right-1.5 text-[9px] font-semibold tracking-wider text-charcoal-muted bg-cream border border-cream-border rounded px-1 py-[1px] pointer-events-none select-none"
           style={{
-            fontSize: 7.5,
-            fontWeight: 700,
-            letterSpacing: '2.2px',
-            fontFamily: 'Satoshi, system-ui, sans-serif',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
           }}
         >
-          <textPath href="#fb-arc" startOffset="50%" textAnchor="middle">
-            FEEDBACK
-          </textPath>
-        </text>
-        {/* Centered green chat-spark icon */}
-        <g transform="translate(28,33)" className="text-green">
-          <path
-            d="M -9 -4 Q -9 -9 -4 -9 L 4 -9 Q 9 -9 9 -4 L 9 1 Q 9 6 4 6 L -2 6 L -6 9 L -5 6 Q -9 5 -9 1 Z"
-            fill="currentColor"
-          />
-        </g>
-      </svg>
-    </button>
+          ⌘/
+        </span>
+      </button>
+      <button
+        onClick={onClick}
+        className="text-[12px] font-bold text-green tracking-tight whitespace-nowrap hover:text-green-hover transition-colors"
+      >
+        tinker / improve this app!
+      </button>
+    </div>
   );
 }
 
 export default function FeedbackButton() {
+  const pathname = usePathname();
+  const [bouncing, setBouncing] = useState(false);
   const [open, setOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => newSessionId());
+
+  useEffect(() => {
+    if (pathname !== '/') return;
+    setBouncing(false);
+    const raf = requestAnimationFrame(() => setBouncing(true));
+    const t = setTimeout(() => setBouncing(false), 950);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
+  }, [pathname]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [input, setInput] = useState('');
@@ -149,6 +168,7 @@ export default function FeedbackButton() {
   const [prCopied, setPrCopied] = useState(false);
   // Panel position (offset from bottom-right corner). Dragged via header.
   const [pos, setPos] = useState<{ left: number; bottom: number }>({ left: 24, bottom: 96 });
+  const [fullscreen, setFullscreen] = useState(false);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -163,17 +183,40 @@ export default function FeedbackButton() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // ⌘/ shortcut toggles panel
+  // ⌘/ toggles panel · ⌘⇧/ toggles fullscreen (opens if closed) · Esc exits fullscreen
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      // Shift+/ on US layout produces "?", so accept either key + rely on e.code as a fallback.
+      const isSlash = e.key === '/' || e.key === '?' || e.code === 'Slash';
+      if ((e.metaKey || e.ctrlKey) && isSlash) {
         e.preventDefault();
-        setOpen((v) => !v);
+        if (e.shiftKey) {
+          setOpen((o) => {
+            if (!o) {
+              setFullscreen(true);
+              return true;
+            }
+            setFullscreen((f) => !f);
+            return true;
+          });
+        } else {
+          setOpen((v) => !v);
+        }
+        return;
+      }
+      if (e.key === 'Escape' && fullscreen) {
+        e.preventDefault();
+        setFullscreen(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [fullscreen]);
+
+  // Reset fullscreen when the panel closes — don't persist across sessions.
+  useEffect(() => {
+    if (!open) setFullscreen(false);
+  }, [open]);
 
   const loadDraft = useCallback(
     async (file: 'issue.md' | 'comment.md') => {
@@ -406,13 +449,17 @@ export default function FeedbackButton() {
     }
   };
 
-  if (!open) return <FeedbackPill onClick={() => setOpen(true)} />;
+  if (!open) return <FeedbackPill onClick={() => setOpen(true)} bouncing={bouncing} />;
 
   return (
     <>
-      <FeedbackPill onClick={() => setOpen(false)} />
+      <FeedbackPill onClick={() => setOpen(false)} bouncing={bouncing} />
       <div
-        className="fixed z-[101] w-[420px] max-w-[calc(100vw-3rem)] bg-cream border border-cream-border rounded-lg flex flex-col overflow-hidden"
+        className={
+          fullscreen
+            ? 'fixed z-[101] inset-0 bg-cream flex flex-col overflow-hidden'
+            : 'fixed z-[101] w-[420px] max-w-[calc(100vw-3rem)] bg-cream border border-cream-border rounded-lg flex flex-col overflow-hidden'
+        }
         onWheel={(e) => {
           // Block page-scroll while the cursor is over the panel. Allow the
           // wheel event only inside the transcript (its own scroll container).
@@ -421,21 +468,27 @@ export default function FeedbackButton() {
           );
           if (!inTranscript) e.preventDefault();
         }}
-        style={{
-          left: `${pos.left}px`,
-          bottom: `${pos.bottom}px`,
-          height: 'min(620px, calc(100vh - 7rem))',
-          boxShadow:
-            '0 20px 50px rgba(0,0,0,0.18), 0 6px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.02)',
-        }}
+        style={
+          fullscreen
+            ? undefined
+            : {
+                left: `${pos.left}px`,
+                bottom: `${pos.bottom}px`,
+                height: 'min(620px, calc(100vh - 7rem))',
+                boxShadow:
+                  '0 20px 50px rgba(0,0,0,0.18), 0 6px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.02)',
+              }
+        }
       >
-        {/* Header — drag handle */}
+        {/* Header — drag handle (drag disabled in fullscreen) */}
         <div
-          onPointerDown={onHeaderPointerDown}
-          onPointerMove={onHeaderPointerMove}
-          onPointerUp={onHeaderPointerUp}
-          onPointerCancel={onHeaderPointerUp}
-          className="flex items-center justify-between px-4 py-2.5 border-b border-cream-border bg-cream-raised cursor-grab active:cursor-grabbing select-none touch-none">
+          onPointerDown={fullscreen ? undefined : onHeaderPointerDown}
+          onPointerMove={fullscreen ? undefined : onHeaderPointerMove}
+          onPointerUp={fullscreen ? undefined : onHeaderPointerUp}
+          onPointerCancel={fullscreen ? undefined : onHeaderPointerUp}
+          className={`flex items-center justify-between px-4 py-2.5 border-b border-cream-border bg-cream-raised select-none touch-none ${
+            fullscreen ? '' : 'cursor-grab active:cursor-grabbing'
+          }`}>
           <span className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted font-medium">
             Feedback
           </span>
@@ -459,6 +512,34 @@ export default function FeedbackButton() {
               title="Start a new feedback session"
             >
               New chat
+            </button>
+            <button
+              onClick={() => setFullscreen((v) => !v)}
+              className="text-charcoal-muted hover:text-charcoal w-7 h-7 flex items-center justify-center transition-colors"
+              title={fullscreen ? 'Restore (⌘⇧/ · Esc)' : 'Fullscreen (⌘⇧/)'}
+              aria-label={fullscreen ? 'Restore' : 'Fullscreen'}
+            >
+              {fullscreen ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M5 1 L5 5 L1 5 M9 5 L13 5 L13 1 M13 9 L9 9 L9 13 M5 13 L5 9 L1 9"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M5 1 L1 1 L1 5 M9 1 L13 1 L13 5 M13 9 L13 13 L9 13 M5 13 L1 13 L1 9"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
             </button>
             <button
               onClick={() => setOpen(false)}
