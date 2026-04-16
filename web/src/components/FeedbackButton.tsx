@@ -8,11 +8,44 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ChatMessage } from '@/lib/types';
-import { streamFeedback } from '@/lib/feedbackStream';
+import { deleteFeedbackSession, streamFeedback, ToolEvent } from '@/lib/feedbackStream';
 
 let msgIdCounter = 0;
 interface DisplayMessage extends ChatMessage {
   id: number;
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + '…';
+}
+
+function ToolLine({ tool, summary, done, isError }: ToolEvent) {
+  const verb =
+    tool === 'Bash' ? 'Running' :
+    tool === 'Read' ? 'Reading' :
+    tool === 'Edit' ? 'Editing' :
+    tool === 'Write' ? 'Writing' :
+    tool === 'Grep' ? 'Searching' :
+    tool === 'Glob' ? 'Searching' :
+    tool === 'WebFetch' ? 'Fetching' :
+    tool === 'Task' ? 'Thinking' :
+    tool;
+  return (
+    <div className={`text-[12px] italic leading-[1.5] flex items-center gap-1.5 ${
+      isError ? 'text-danger' : 'text-charcoal-muted'
+    }`}>
+      {!done && (
+        <span className="inline-block w-1 h-1 rounded-full bg-charcoal-muted/60 animate-pulse" />
+      )}
+      <span>{verb}</span>
+      {summary && (
+        <code className="text-[11px] font-mono text-charcoal-muted/80 truncate max-w-[280px]">
+          {truncate(summary, 60)}
+        </code>
+      )}
+    </div>
+  );
 }
 
 function newSessionId(): string {
@@ -39,40 +72,26 @@ function stripSentinels(text: string): string {
   return text.replace(/<<<\s*draft:[\w.-]+\s*>>>/g, '').trim();
 }
 
-const REPO = 'Julian-Moncarz/tutorin';
-const REPO_ROOT = '/Users/julianmoncarz/tutorin';
-
-function buildPrPrompt(issueNumber: number): string {
-  return `You're helping implement user feedback for Tutorin.
-
-Read issue #${issueNumber} on ${REPO}:
-
-  gh issue view ${issueNumber} --repo ${REPO} --comments
-
-The latest comment describes what the user actually wants fixed. Implement the minimum change that delivers that outcome.
-
-Constraints:
-- Work from ${REPO_ROOT}
-- Run \`npx tsc --noEmit\` from web/ before committing
-- Branch name: fix/issue-${issueNumber}
-- Open the PR with:
-    gh pr create --repo ${REPO} --base main --title "<short imperative title>" --body "Closes #${issueNumber}"
-- Keep the diff minimal; no refactors.`;
-}
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function FeedbackMarkdown({ children }: { children: string }) {
   return (
     <div className="prose-chat text-[15px] leading-[1.65] text-charcoal">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          a: ({ href, children, ...rest }) => (
+            <a
+              {...rest}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-hover underline underline-offset-2 decoration-green-hover/40 hover:decoration-green-hover transition-colors break-all"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
         {stripSentinels(children)}
       </ReactMarkdown>
     </div>
@@ -146,10 +165,15 @@ export default function FeedbackButton() {
   }, [pathname]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
+  const [streamingTools, setStreamingTools] = useState<ToolEvent[]>([]);
+  // True only between "turn started" and "first text/tool event arrived." Used
+  // to show dots during the initial wait without flashing them every time a
+  // transient tool line clears mid-turn.
+  const [awaitingFirstEvent, setAwaitingFirstEvent] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [issueState, setIssueState] = useState<string>('');
-  // Draft state: which file Claude just wrote, and the loaded title/body for editing.
+  // Draft state: Pimberton emits <<<draft:issue.md>>> sentinels; we load the
+  // file and show an editor.
   const [draft, setDraft] = useState<{
     file: 'issue.md' | 'comment.md';
     title: string;
@@ -162,8 +186,6 @@ export default function FeedbackButton() {
   const [filedNotice, setFiledNotice] = useState<
     { kind: 'issue' | 'comment'; number: number; url: string } | null
   >(null);
-  const [prPrompt, setPrPrompt] = useState<string | null>(null);
-  const [prCopied, setPrCopied] = useState(false);
   // Panel position (offset from bottom-right corner). Dragged via header.
   const [pos, setPos] = useState<{ left: number; bottom: number }>({ left: 24, bottom: 96 });
   const [fullscreen, setFullscreen] = useState(false);
@@ -215,6 +237,16 @@ export default function FeedbackButton() {
     if (!open) setFullscreen(false);
   }, [open]);
 
+  // Tell the server to kill the Pimberton subprocess on true tab close /
+  // navigation. We only listen on `pagehide` — NOT `visibilitychange`, which
+  // fires when the user alt-tabs or backgrounds the tab and would kill an
+  // in-flight turn (producing "process closed (code=143)" errors).
+  useEffect(() => {
+    const onHide = () => deleteFeedbackSession(sessionId);
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [sessionId]);
+
   const loadDraft = useCallback(
     async (file: 'issue.md' | 'comment.md') => {
       setDraft({ file, title: '', body: '', loading: true, error: null });
@@ -236,20 +268,59 @@ export default function FeedbackButton() {
     [sessionId]
   );
 
-  const runChat = useCallback(
-    async (msgs: DisplayMessage[], issueStateOverride?: string) => {
+  const sendToSession = useCallback(
+    async (userMessage: string) => {
       setLoading(true);
       setStreamingText('');
+      setStreamingTools([]);
+      setAwaitingFirstEvent(true);
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      // Accumulate tools in a closure-local array so the completion handler
+      // attaches the final list to the assistant message without racing React
+      // state updates.
+      // Minimum time a tool line stays on screen, so fast calls (Read a small
+      // file, short Grep) don't just flash and disappear. Any tool that
+      // completes sooner is held back from removal until this deadline.
+      const MIN_TOOL_VISIBLE_MS = 600;
+      const toolShownAt = new Map<string, number>();
       try {
-        const plain: ChatMessage[] = msgs.map(({ role, content }) => ({ role, content }));
         const full = await streamFeedback(
           sessionId,
-          plain,
-          issueStateOverride ?? issueState,
-          (t) => setStreamingText(t),
+          userMessage,
+          {
+            onText: (t) => {
+              setAwaitingFirstEvent(false);
+              setStreamingText(t);
+            },
+            onTool: (ev) => {
+              setAwaitingFirstEvent(false);
+              toolShownAt.set(ev.id, Date.now());
+              setStreamingTools((prev) => [...prev, ev]);
+            },
+            onToolDone: (id) => {
+              // Transient: remove once the minimum visible window has passed.
+              // Errors surface via onError, not the tool line.
+              const elapsed = Date.now() - (toolShownAt.get(id) ?? Date.now());
+              const remaining = Math.max(0, MIN_TOOL_VISIBLE_MS - elapsed);
+              toolShownAt.delete(id);
+              const remove = () =>
+                setStreamingTools((prev) => prev.filter((t) => t.id !== id));
+              if (remaining === 0) remove();
+              else setTimeout(remove, remaining);
+            },
+            onError: (msg) => {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: ++msgIdCounter,
+                  role: 'assistant',
+                  content: `_Something went sideways: ${msg}_`,
+                },
+              ]);
+            },
+          },
           controller.signal
         );
         if (full) {
@@ -257,11 +328,8 @@ export default function FeedbackButton() {
             ...prev,
             { id: ++msgIdCounter, role: 'assistant', content: full },
           ]);
-          // Sentinel detection — open the right draft window.
           if (/<<<\s*draft:issue\.md\s*>>>/.test(full)) {
             loadDraft('issue.md');
-          } else if (/<<<\s*draft:comment\.md\s*>>>/.test(full)) {
-            loadDraft('comment.md');
           }
         }
       } catch (err) {
@@ -270,24 +338,27 @@ export default function FeedbackButton() {
       } finally {
         setLoading(false);
         setStreamingText('');
+        setStreamingTools([]);
+        setAwaitingFirstEvent(false);
       }
     },
-    [sessionId, issueState, loadDraft]
+    [sessionId, loadDraft]
   );
 
-  // Greet on first open of a session
+  // Greet on first open of a session — sending an empty userMessage prompts
+  // Pimberton to introduce himself.
   useEffect(() => {
     if (!open) return;
     if (greetedRef.current) return;
     if (messages.length > 0) return;
     greetedRef.current = true;
-    runChat([]);
-  }, [open, messages.length, runChat]);
+    sendToSession('');
+  }, [open, messages.length, sendToSession]);
 
   // Scroll to bottom on new messages / streaming
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, streamingText, open]);
+  }, [messages, streamingText, streamingTools, open]);
 
   useEffect(() => {
     if (open && !loading) inputRef.current?.focus();
@@ -295,15 +366,13 @@ export default function FeedbackButton() {
 
   const send = async () => {
     if (!input.trim() || loading) return;
-    const userMsg: DisplayMessage = {
-      id: ++msgIdCounter,
-      role: 'user',
-      content: input.trim(),
-    };
-    const next = [...messages, userMsg];
-    setMessages(next);
+    const text = input.trim();
+    setMessages((prev) => [
+      ...prev,
+      { id: ++msgIdCounter, role: 'user', content: text },
+    ]);
     setInput('');
-    await runChat(next);
+    await sendToSession(text);
   };
 
   const onInputKey = (e: React.KeyboardEvent) => {
@@ -316,6 +385,15 @@ export default function FeedbackButton() {
   const fileIssue = async () => {
     if (!draft || draft.file !== 'issue.md') return;
     if (!draft.title.trim() || !draft.body.trim()) return;
+    // Don't file while a previous turn is still streaming — the [FILED] message
+    // would abort the in-flight stream and the server would treat the session
+    // as busy, silently dropping the signal.
+    if (loading) {
+      setDraft((d) =>
+        d ? { ...d, error: 'Pimberton is still finishing up. Give me a second and try again.' } : d
+      );
+      return;
+    }
     setFiling(true);
     try {
       const res = await fetch('/api/feedback/submit-issue', {
@@ -328,73 +406,15 @@ export default function FeedbackButton() {
         setDraft((d) => (d ? { ...d, error: data.error || 'Failed to file issue' } : d));
         return;
       }
-      // Update state Claude sees on next turn.
-      setIssueState(`Issue #${data.number} filed at ${data.url}`);
-      // Inject a note into the chat transcript.
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: ++msgIdCounter,
-          role: 'assistant',
-          content: `**Filed →** [#${data.number}](${data.url})`,
-        },
-      ]);
       setDraft(null);
       setFiledIssue({ number: data.number, url: data.url });
       setFiledNotice({ kind: 'issue', number: data.number, url: data.url });
       setTimeout(() => setFiledNotice(null), 8000);
-      // Auto-kick Claude so it pivots to "what would the fix look like?"
-      // immediately, without waiting for the user to type.
-      const pivotMessages: DisplayMessage[] = [
-        ...messages,
-        {
-          id: ++msgIdCounter,
-          role: 'assistant',
-          content: `**Filed →** [#${data.number}](${data.url})`,
-        },
-      ];
-      const freshIssueState = `Issue #${data.number} filed at ${data.url}`;
-      setTimeout(() => runChat(pivotMessages, freshIssueState), 400);
-    } catch (err) {
-      setDraft((d) => (d ? { ...d, error: String(err) } : d));
-    } finally {
-      setFiling(false);
-    }
-  };
-
-  const postComment = async () => {
-    if (!draft || draft.file !== 'comment.md' || !filedIssue) return;
-    if (!draft.body.trim()) return;
-    setFiling(true);
-    try {
-      const res = await fetch('/api/feedback/submit-comment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issueNumber: filedIssue.number, body: draft.body }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setDraft((d) => (d ? { ...d, error: data.error || 'Failed to post comment' } : d));
-        return;
-      }
-      const promptText = buildPrPrompt(filedIssue.number);
-      setPrPrompt(promptText);
-      const copied = await copyToClipboard(promptText);
-      setPrCopied(copied);
-      const clipboardNote = copied
-        ? '📋 **Copied a prompt to your clipboard.**'
-        : '⚠️ Couldn\'t access your clipboard — copy the prompt below.';
-      const intro =
-        `**Comment delivered →** [#${filedIssue.number}](${filedIssue.url})\n\n` +
-        `${clipboardNote} Paste it into Claude Code in \`${REPO_ROOT}\` — it will modify the app to match your feedback and open a PR for you.\n\n` +
-        '```\n' + promptText + '\n```';
-      setMessages((prev) => [
-        ...prev,
-        { id: ++msgIdCounter, role: 'assistant', content: intro },
-      ]);
-      setDraft(null);
-      setFiledNotice({ kind: 'comment', number: filedIssue.number, url: filedIssue.url });
-      setTimeout(() => setFiledNotice(null), 8000);
+      // Signal Pimberton that the issue is live. He treats [FILED] messages as
+      // environment signals (not user typing) and won't echo them.
+      await sendToSession(
+        `[FILED] Issue #${data.number} filed at ${data.url}. Continue with the Gate phase.`
+      );
     } catch (err) {
       setDraft((d) => (d ? { ...d, error: String(err) } : d));
     } finally {
@@ -404,15 +424,15 @@ export default function FeedbackButton() {
 
   const newChat = () => {
     abortRef.current?.abort();
+    // Fire-and-forget cleanup — the server kills the old Pimberton subprocess.
+    deleteFeedbackSession(sessionId);
     greetedRef.current = false;
     setMessages([]);
     setStreamingText('');
+    setStreamingTools([]);
     setDraft(null);
-    setIssueState('');
     setFiledIssue(null);
     setFiledNotice(null);
-    setPrPrompt(null);
-    setPrCopied(false);
     setInput('');
     setLoading(false);
     setSessionId(newSessionId());
@@ -490,19 +510,6 @@ export default function FeedbackButton() {
             Feedback
           </span>
           <div className="flex items-center gap-1">
-            {prPrompt && (
-              <button
-                onClick={async () => {
-                  const ok = await copyToClipboard(prPrompt);
-                  setPrCopied(ok);
-                  if (ok) setTimeout(() => setPrCopied(false), 1600);
-                }}
-                className="text-[11px] text-green-hover hover:text-green px-2 py-1 transition-colors"
-                title="Copy the PR prompt to your clipboard"
-              >
-                {prCopied ? '✓ Copied' : 'Copy PR prompt'}
-              </button>
-            )}
             <button
               onClick={newChat}
               className="text-[11px] text-charcoal-muted hover:text-charcoal px-2 py-1 transition-colors"
@@ -519,7 +526,7 @@ export default function FeedbackButton() {
               {fullscreen ? (
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path
-                    d="M5 1 L5 5 L1 5 M9 5 L13 5 L13 1 M13 9 L9 9 L9 13 M5 13 L5 9 L1 9"
+                    d="M5 1 L5 5 L1 5 M9 1 L9 5 L13 5 M13 9 L9 9 L9 13 M5 13 L5 9 L1 9"
                     stroke="currentColor"
                     strokeWidth="1.5"
                     strokeLinecap="round"
@@ -597,12 +604,22 @@ export default function FeedbackButton() {
               )}
             </div>
           ))}
-          {streamingText && (
-            <div className="animate-fade-up">
-              <FeedbackMarkdown>{streamingText}</FeedbackMarkdown>
+          {(streamingText || streamingTools.length > 0) && (
+            <div className="animate-fade-up space-y-1.5">
+              {streamingText && <FeedbackMarkdown>{streamingText}</FeedbackMarkdown>}
+              {streamingTools.length > 0 && (
+                <div className="space-y-0.5 pl-0.5">
+                  {streamingTools.map((t) => (
+                    <ToolLine key={t.id} {...t} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          {loading && !streamingText && <Dots />}
+          {/* Dots only appear during the initial wait for a turn's first
+              event. After that, tool lines and streaming text carry the weight;
+              mid-turn gaps stay quiet so the UI doesn't feel frantic. */}
+          {loading && awaitingFirstEvent && <Dots />}
           <div ref={bottomRef} />
         </div>
 
@@ -632,7 +649,7 @@ export default function FeedbackButton() {
           onTitleChange={(title) => setDraft((d) => (d ? { ...d, title } : d))}
           onBodyChange={(body) => setDraft((d) => (d ? { ...d, body } : d))}
           onClose={() => setDraft(null)}
-          onSubmit={draft.file === 'issue.md' ? fileIssue : postComment}
+          onSubmit={draft.file === 'issue.md' ? fileIssue : undefined}
         />
       )}
     </>

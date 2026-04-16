@@ -1,12 +1,40 @@
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 
-const TURN_TIMEOUT_MS = 120_000;
+const DEFAULT_TURN_TIMEOUT_MS = 120_000;
+
+export interface SessionOptions {
+  turnTimeoutMs?: number;
+}
 
 export type StdoutEvent =
   | { type: 'text'; text: string }
+  | { type: 'tool'; id: string; tool: string; summary: string }
+  | { type: 'tool_done'; id: string; isError?: boolean }
   | { type: 'done' }
   | { type: 'busy' }
   | { type: 'error'; error: string };
+
+function summarizeToolUse(name: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return '';
+  const i = input as Record<string, unknown>;
+  const pick = (k: string) => (typeof i[k] === 'string' ? (i[k] as string) : '');
+  switch (name) {
+    case 'Bash': return pick('command');
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+    case 'NotebookEdit': return pick('file_path');
+    case 'Grep':
+    case 'Glob': return pick('pattern');
+    case 'WebFetch': return pick('url');
+    case 'Task': return (pick('description') || pick('prompt')).split('\n')[0];
+    default:
+      for (const v of Object.values(i)) {
+        if (typeof v === 'string' && v.length > 0) return v;
+      }
+      return '';
+  }
+}
 
 class AsyncQueue<T> {
   private items: T[] = [];
@@ -31,7 +59,10 @@ export class ClaudeSession {
   private turnQueue: AsyncQueue<StdoutEvent> | null = null;
   private busy = false;
 
-  constructor(private readonly systemPrompt: string) {}
+  constructor(
+    private readonly systemPrompt: string,
+    private readonly options: SessionOptions = {}
+  ) {}
 
   private start() {
     const args = [
@@ -87,12 +118,45 @@ export class ClaudeSession {
     let data: unknown;
     try { data = JSON.parse(line); } catch { return; }
     if (!data || typeof data !== 'object') return;
-    const d = data as { type?: string; message?: { content?: Array<{ type?: string; text?: string }> }; result?: string; is_error?: boolean };
+    const d = data as {
+      type?: string;
+      message?: {
+        role?: string;
+        content?: Array<{
+          type?: string;
+          text?: string;
+          id?: string;
+          name?: string;
+          input?: unknown;
+          tool_use_id?: string;
+          is_error?: boolean;
+        }>;
+      };
+      result?: string;
+      is_error?: boolean;
+    };
 
     if (d.type === 'assistant' && d.message?.content) {
       for (const block of d.message.content) {
         if (block.type === 'text' && block.text) {
           this.turnQueue?.push({ type: 'text', text: block.text });
+        } else if (block.type === 'tool_use' && block.id && block.name) {
+          this.turnQueue?.push({
+            type: 'tool',
+            id: block.id,
+            tool: block.name,
+            summary: summarizeToolUse(block.name, block.input),
+          });
+        }
+      }
+    } else if (d.type === 'user' && d.message?.content) {
+      for (const block of d.message.content) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          this.turnQueue?.push({
+            type: 'tool_done',
+            id: block.tool_use_id,
+            isError: !!block.is_error,
+          });
         }
       }
     } else if (d.type === 'result') {
@@ -140,7 +204,7 @@ export class ClaudeSession {
         return;
       }
 
-      const deadline = Date.now() + TURN_TIMEOUT_MS;
+      const deadline = Date.now() + (this.options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
       while (true) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
@@ -186,12 +250,13 @@ const sessions = new Map<string, ClaudeSession>();
 
 export function getOrCreateSession(
   id: string,
-  buildSystemPrompt: () => string
+  buildSystemPrompt: () => string,
+  options?: SessionOptions
 ): { session: ClaudeSession; isNew: boolean } {
   let s = sessions.get(id);
   const isNew = !s;
   if (!s) {
-    s = new ClaudeSession(buildSystemPrompt());
+    s = new ClaudeSession(buildSystemPrompt(), options);
     sessions.set(id, s);
   }
   return { session: s, isNew };
