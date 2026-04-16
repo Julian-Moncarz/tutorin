@@ -152,7 +152,8 @@ export function abandonFirstQuestionPrefetch(): void {
 // Best-effort cleanup of any unconsumed prefetch on tab close, regardless
 // of which page currently owns it. Runs once per module load.
 if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', () => {
+  window.addEventListener('pagehide', (e) => {
+    if (e.persisted) return;
     if (firstQuestionPrefetch) {
       endSessionOnUnload(firstQuestionPrefetch.sessionId);
     }

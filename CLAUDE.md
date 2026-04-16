@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Tutorin is a test-prep learning system built on the "file over app" philosophy. Curriculum, progress, and context live as plain files in a user-owned study folder — never in an app database. Read `spec.md` for the full system design before making non-trivial changes.
+Tutorin is a test-prep learning system built on the "file over app" philosophy. Curriculum, progress, and context live as plain files in a user-owned study folder — never in an app database.
 
 ## Two-part architecture
 
@@ -31,7 +31,7 @@ There is no test suite, no linter configured, and no formatter script. Type-chec
 ## Key modules
 
 - `web/src/lib/files.ts` — all filesystem reads/writes against `STUDY_DIR`. Writes are atomic (temp file + rename). Logs go to `$STUDY_DIR/logs/`.
-- `web/src/lib/algorithm.ts` — skill selection. Status machine: `not_started → practicing → mastered` (3 correct retrievals = mastered). Selection order: first unattempted → fewest-correct unmastered → oldest mastered for review. `shouldBeTemptation` fires at exactly 2 correct retrievals.
+- `web/src/lib/algorithm.ts` — skill selection. Status machine: `not_started → practicing → mastered` (mastery threshold is adaptive, roughly 3 correct retrievals, scaled 1–3 by examWeight/timeCost). Selection: non-mastered skills ranked by `ROI = (examWeight × deficit × flowBoost) / timeCost` (highest first); when every skill is mastered, surface the one with the oldest last-attempt for review. `deficit` peaks for unattempted skills and decays with correct retrievals; `flowBoost` gives a small multiplier when the previous attempt was correct. `shouldBeTemptation` fires at exactly 2 correct retrievals.
 - `web/src/lib/claudeSessions.ts` — long-lived `claude -p --input-format stream-json --output-format stream-json` subprocesses, one per chat session, kept in a module-level `Map<sessionId, ClaudeSession>`. Each turn writes `{"type":"user","message":{"role":"user","content":"..."}}` NDJSON to stdin and reads `type:"assistant"` / `type:"result"` events from stdout. No idle sweeper — sessions live until the client explicitly DELETEs them (via `/api/chat/session`), the server process exits, or a subprocess crashes. Turn timeout 120s. Concurrent `send()` on a busy session yields a `busy` event; caller-abort does NOT kill the session (the turn runs to completion to keep `busy` correct).
 - `web/src/app/api/chat/route.ts` — thin wrapper over `claudeSessions`. Body: `{skill, sessionId, message: string | null, image?}`. `message === null` + `isNew` → render `tutor-turn1-template.md` and send as turn 1. `message !== null` + `!isNew` → forward as the student's reply. `message !== null` + `isNew` → 409 `session_expired` (server swept or never had this id). Emits `type:"assistant"` text blocks as SSE `data:` frames; `busy` surfaces as `data: {"error":"session busy"}`.
 - `web/src/app/api/chat/session/route.ts` — `DELETE /api/chat/session?id=X` tears down a session. Also accepts `POST` so the browser can use `navigator.sendBeacon` in `pagehide` handlers (sendBeacon is POST-only).
@@ -48,8 +48,8 @@ The file shapes are the public API of this system. Changing them breaks the inta
 - `context.md`: free-form markdown injected into every tutor prompt.
 - `logs/`: per-session conversation JSON + `motivation.json`.
 
-If you modify any of these, update `spec.md`, `skill/SKILL.md`, and `web/src/lib/types.ts` together.
+If you modify any of these, update `skill/SKILL.md` and `web/src/lib/types.ts` together.
 
 ## Design principles to respect
 
-The system encodes specific learning-science choices (see `learning-interventions-memo.md` and the table in `spec.md`): step-level + high-information feedback, retrieval-first, productive failure on cold attempts, interleaving, no Socratic hinting, no punitive gamification (no streaks/lives/hearts), zero user decisions (algorithm picks next skill). Don't add features that undermine these — e.g., don't add hint buttons, don't add skill pickers on the dashboard, don't turn feedback into leading questions.
+The system encodes specific learning-science choices (see `learning-interventions-memo.md`): step-level + high-information feedback, retrieval-first, productive failure on cold attempts, interleaving, no Socratic hinting, no punitive gamification (no streaks/lives/hearts), zero user decisions (algorithm picks next skill). Don't add features that undermine these — e.g., don't add hint buttons, don't add skill pickers on the dashboard, don't turn feedback into leading questions.
