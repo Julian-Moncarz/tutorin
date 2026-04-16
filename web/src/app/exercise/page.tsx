@@ -19,14 +19,6 @@ function isCorrectMessage(text: string): boolean {
   return text.trimStart().startsWith('✅');
 }
 
-const PHOTO_TOKEN = '[[📷]]';
-function stripPhotoToken(text: string): string {
-  return text.split(PHOTO_TOKEN).join('').replace(/\n{3,}$/g, '\n\n').trimEnd();
-}
-function hasPhotoToken(text: string): boolean {
-  return text.includes(PHOTO_TOKEN);
-}
-
 interface Tiers {
   tier1: number; // fraction of skills with ≥1 correct
   tier2: number; // ≥2 correct
@@ -132,7 +124,6 @@ export default function ExercisePage() {
   const [leftPct, setLeftPct] = useState(42);
   const [focusMode, setFocusMode] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const autoOpenedForRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const answerRef = useRef<HTMLTextAreaElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -278,17 +269,6 @@ export default function ExercisePage() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitted, focusMode, messages, skill, loading, allDone, initializing, cameraOpen]);
-
-  // Auto-open camera when tutor emits [[📷]] in a completed message.
-  useEffect(() => {
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    if (!lastAssistant) return;
-    if (!hasPhotoToken(lastAssistant.content)) return;
-    if (autoOpenedForRef.current === lastAssistant.id) return;
-    if (loading) return;
-    autoOpenedForRef.current = lastAssistant.id;
-    setCameraOpen(true);
-  }, [messages, loading]);
 
   const doChat = useCallback(async (
     currentSkill: string,
@@ -752,7 +732,7 @@ export default function ExercisePage() {
               {initializing || (loading && !showProblem) ? (
                 <Dots />
               ) : (
-                <ProblemMarkdown>{stripPhotoToken(showProblem)}</ProblemMarkdown>
+                <ProblemMarkdown>{showProblem}</ProblemMarkdown>
               )}
             </div>
           </div>
@@ -849,7 +829,7 @@ export default function ExercisePage() {
               className="overflow-y-auto px-10 pt-24 pb-10"
             >
               <div className="max-w-[460px] ml-auto space-y-8">
-                <ProblemMarkdown dim>{stripPhotoToken(problem)}</ProblemMarkdown>
+                <ProblemMarkdown dim>{problem}</ProblemMarkdown>
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.22em] text-charcoal-muted/70 font-medium mb-3">
                     Your answer
@@ -904,7 +884,7 @@ export default function ExercisePage() {
               {feedbackMessages.map((msg) =>
                 msg.role === 'assistant' ? (
                   <div key={msg.id} className="animate-fade-up">
-                    <TutorMarkdown>{stripPhotoToken(msg.content)}</TutorMarkdown>
+                    <TutorMarkdown>{msg.content}</TutorMarkdown>
                   </div>
                 ) : (
                   <div key={msg.id} className="animate-fade-up flex justify-end">
@@ -925,7 +905,7 @@ export default function ExercisePage() {
               )}
               {streamingText && (
                 <div className="animate-fade-up">
-                  <TutorMarkdown>{stripPhotoToken(streamingText)}</TutorMarkdown>
+                  <TutorMarkdown>{streamingText}</TutorMarkdown>
                 </div>
               )}
               {loading && !streamingText && <Dots />}
