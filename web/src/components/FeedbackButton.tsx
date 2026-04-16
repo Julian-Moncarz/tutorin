@@ -95,7 +95,7 @@ function FeedbackPill({ onClick, bouncing }: { onClick: () => void; bouncing?: b
         onClick={onClick}
         aria-label="Tinker / improve this app"
         title="Tinker / improve this app (⌘/ · ⌘⇧/ fullscreen)"
-        className="relative w-14 h-14 rounded-full bg-cream border border-cream-border hover:-translate-y-0.5 active:translate-y-0 transition-transform"
+        className="w-14 h-14 rounded-full bg-cream border border-cream-border hover:-translate-y-0.5 active:translate-y-0 transition-transform"
         style={{
           boxShadow:
             '0 6px 18px rgba(0,0,0,0.14), 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
@@ -109,22 +109,20 @@ function FeedbackPill({ onClick, bouncing }: { onClick: () => void; bouncing?: b
             />
           </g>
         </svg>
-        <span
-          aria-hidden
-          className="absolute -top-1.5 -right-1.5 text-[9px] font-semibold tracking-wider text-charcoal-muted bg-cream border border-cream-border rounded px-1 py-[1px] pointer-events-none select-none"
-          style={{
-            boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          }}
-        >
-          ⌘/
-        </span>
       </button>
       <button
         onClick={onClick}
-        className="text-[12px] font-bold text-green tracking-tight whitespace-nowrap hover:text-green-hover transition-colors"
+        className="flex flex-col items-start leading-tight whitespace-nowrap group"
       >
-        tinker / improve this app!
+        <span className="text-[12px] font-bold text-green tracking-tight group-hover:text-green-hover transition-colors">
+          tinker / improve this app!
+        </span>
+        <span
+          className="text-[10px] text-charcoal-muted/70 mt-0.5"
+          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+        >
+          ⌘/
+        </span>
       </button>
     </div>
   );
@@ -186,19 +184,18 @@ export default function FeedbackButton() {
   // ⌘/ toggles panel · ⌘⇧/ toggles fullscreen (opens if closed) · Esc exits fullscreen
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
       // Shift+/ on US layout produces "?", so accept either key + rely on e.code as a fallback.
       const isSlash = e.key === '/' || e.key === '?' || e.code === 'Slash';
-      if ((e.metaKey || e.ctrlKey) && isSlash) {
+      if (mod && isSlash) {
         e.preventDefault();
         if (e.shiftKey) {
-          setOpen((o) => {
-            if (!o) {
-              setFullscreen(true);
-              return true;
-            }
+          if (!open) {
+            setOpen(true);
+            setFullscreen(true);
+          } else {
             setFullscreen((f) => !f);
-            return true;
-          });
+          }
         } else {
           setOpen((v) => !v);
         }
@@ -211,7 +208,7 @@ export default function FeedbackButton() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [fullscreen]);
+  }, [open, fullscreen]);
 
   // Reset fullscreen when the panel closes — don't persist across sessions.
   useEffect(() => {
