@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Tutorin is a test-prep learning system built on the "file over app" philosophy. Curriculum, progress, and context live as plain files in a user-owned study folder — never in an app database. Read `spec.md` for the full system design before making non-trivial changes.
+Tutorin is a test-prep learning system built on the "file over app" philosophy. Curriculum, progress, and context live as plain files in a user-owned study folder — never in an app database.
 
 ## Two-part architecture
 
@@ -48,8 +48,8 @@ The file shapes are the public API of this system. Changing them breaks the inta
 - `context.md`: free-form markdown injected into every tutor prompt.
 - `logs/`: per-session conversation JSON + `motivation.json`.
 
-If you modify any of these, update `spec.md`, `skill/SKILL.md`, and `web/src/lib/types.ts` together.
+If you modify any of these, update `skill/SKILL.md` and `web/src/lib/types.ts` together.
 
 ## Design principles to respect
 
-The system encodes specific learning-science choices (see `learning-interventions-memo.md` and the table in `spec.md`): step-level + high-information feedback, retrieval-first, productive failure on cold attempts, interleaving, no Socratic hinting, no punitive gamification (no streaks/lives/hearts), zero user decisions (algorithm picks next skill). Don't add features that undermine these — e.g., don't add hint buttons, don't add skill pickers on the dashboard, don't turn feedback into leading questions.
+The system encodes specific learning-science choices (see `learning-interventions-memo.md`): step-level + high-information feedback, retrieval-first, productive failure on cold attempts, interleaving, no Socratic hinting, no punitive gamification (no streaks/lives/hearts), zero user decisions (algorithm picks next skill). Don't add features that undermine these — e.g., don't add hint buttons, don't add skill pickers on the dashboard, don't turn feedback into leading questions.
