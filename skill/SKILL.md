@@ -20,7 +20,7 @@ Read all files in the current folder. Analyze past exams, lecture slides, syllab
 Based on the interview and materials, create a comprehensive list of skills the student needs to master.
 
 Rules:
-- Skills are plain strings describing one testable ability
+- Each skill must be an object with `name`, `examWeight`, and `timeCost`
 - The verb tells the type: "Compute...", "Explain...", "Prove...", "Find...", "Determine..."
 - Include BOTH procedural skills ("Compute eigenvalues of a 2x2 matrix") AND conceptual skills ("Explain geometrically what eigenvalues represent")
 - Order skills within each topic from foundational to advanced
@@ -29,6 +29,17 @@ Rules:
 - If the student has gaps below the test level, include prerequisite skills
 - Each skill should be atomic — one thing, not a compound task
 - You can put test questions or questions from materials straight in here as skills
+- `examWeight` is required and should be the expected percentage of total exam marks that come from that exact skill
+- `timeCost` is required and should estimate minutes-to-meaningful-gain relative to other skills
+- Do not output plain-string skills. Every skill entry must include the metadata.
+
+Guidance for the metadata:
+- `examWeight`: use the expected `% of exam marks` attributable to that skill
+- `timeCost`: use a simple relative scale like `0.7` to `1.4`
+- Across the whole curriculum, `examWeight` values should sum to about `100`
+- High `examWeight` means this skill is expected to account for a larger slice of the exam
+- High `timeCost` means slower / more expensive to improve
+- Use the actual course materials, past exams, and professor emphasis to set these values
 
 The critical test is this: if the student has mastered every skill, they should be guarenteed to get 100% on the test.
 
@@ -41,8 +52,16 @@ Write the file:
     {
       "topic": "Topic Name",
       "skills": [
-        "Skill description 1",
-        "Skill description 2"
+        {
+          "name": "Skill description 1",
+          "examWeight": 6,
+          "timeCost": 0.9
+        },
+        {
+          "name": "Skill description 2",
+          "examWeight": 2,
+          "timeCost": 1.2
+        }
       ]
     }
   ]

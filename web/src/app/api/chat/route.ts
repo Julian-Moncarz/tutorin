@@ -2,8 +2,8 @@ import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
-import { getContext, getProgress } from '@/lib/files';
-import { getSkillStatus, getCorrectCount, shouldBeTemptation } from '@/lib/algorithm';
+import { getContext, getCurriculum, getProgress } from '@/lib/files';
+import { getSkillStatus, shouldBeTemptation } from '@/lib/algorithm';
 import { ChatMessage } from '@/lib/types';
 
 const CLAUDE_TIMEOUT_MS = 90_000;
@@ -30,9 +30,6 @@ function buildPrompt(
     : '';
 
   const adaptiveBlock = [
-    status === 'needs_examples'
-      ? `- The student FAILED their first attempt at this skill. Lead with a WORKED EXAMPLE: show every step with brief explanations. Then give them a FADED problem (same type, some steps filled in, they complete the rest).`
-      : '',
     status === 'practicing'
       ? `- The student is improving. Focus feedback on errors. Don't over-explain what they already know. Increase difficulty slightly.`
       : '',
@@ -45,7 +42,7 @@ function buildPrompt(
 
   const taskBlock =
     messages.length === 0
-      ? `## Task\nWrite ONE minimal problem that tests the skill: "${skill}".\n\n- Output ONLY the problem statement. No title, no preamble, no meta-commentary, no hints, no encouragement, no closing remarks.\n- Keep it as short as possible while still testing the skill. Match the test's style/notation. Multi-part is fine if the skill description has multiple parts.\n- Do not include "Notes:" or guidance about how to approach it.`
+      ? `## Task\nWrite ONE minimal exam-style problem that tests the skill: "${skill}".\n\n- Output ONLY the problem statement. No title, no preamble, no meta-commentary, no hints, no encouragement, no closing remarks.\n- Keep it as short as possible while still testing the skill. Match the test's style/notation. Multi-part is fine if the skill description has multiple parts.\n- Do not include "Notes:" or guidance about how to approach it.`
       : `## Conversation So Far\n${conversationText}\n\nRespond to the student's latest message following the guidelines above.`;
 
   return PROMPT_TEMPLATE
@@ -72,8 +69,9 @@ export async function POST(req: NextRequest) {
     }
 
     const context = getContext();
+    const curriculum = getCurriculum();
     const progress = getProgress();
-    const status = getSkillStatus(skill, progress);
+    const status = getSkillStatus(skill, progress, curriculum);
     const isTemptation = shouldBeTemptation(skill, progress);
 
     const attemptHistory =

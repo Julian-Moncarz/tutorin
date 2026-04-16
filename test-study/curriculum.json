@@ -4,18 +4,46 @@
     {
       "topic": "Determinants",
       "skills": [
-        "Compute the determinant of a 2x2 matrix",
-        "Compute the determinant of a 3x3 matrix using cofactor expansion",
-        "Explain how row operations affect the determinant and why"
+        {
+          "name": "Compute the determinant of a 2x2 matrix",
+          "examWeight": 14.26,
+          "timeCost": 1
+        },
+        {
+          "name": "Compute the determinant of a 3x3 matrix using cofactor expansion",
+          "examWeight": 14.29,
+          "timeCost": 1
+        },
+        {
+          "name": "Explain how row operations affect the determinant and why",
+          "examWeight": 14.29,
+          "timeCost": 1
+        }
       ]
     },
     {
       "topic": "Eigenvalues & Eigenvectors",
       "skills": [
-        "Explain geometrically what eigenvalues and eigenvectors represent",
-        "Compute eigenvalues of a 2x2 or 3x3 matrix",
-        "Find eigenvectors given eigenvalues",
-        "Diagonalize a matrix or explain why it cannot be diagonalized"
+        {
+          "name": "Explain geometrically what eigenvalues and eigenvectors represent",
+          "examWeight": 14.29,
+          "timeCost": 1
+        },
+        {
+          "name": "Compute eigenvalues of a 2x2 or 3x3 matrix",
+          "examWeight": 14.29,
+          "timeCost": 1
+        },
+        {
+          "name": "Find eigenvectors given eigenvalues",
+          "examWeight": 14.29,
+          "timeCost": 1
+        },
+        {
+          "name": "Diagonalize a matrix or explain why it cannot be diagonalized",
+          "examWeight": 14.29,
+          "timeCost": 1
+        }
       ]
     }
   ]

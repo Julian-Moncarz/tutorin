@@ -31,7 +31,7 @@ There is no test suite, no linter configured, and no formatter script. Type-chec
 ## Key modules
 
 - `web/src/lib/files.ts` — all filesystem reads/writes against `STUDY_DIR`. Writes are atomic (temp file + rename). Logs go to `$STUDY_DIR/logs/`.
-- `web/src/lib/algorithm.ts` — skill selection. Status machine: `not_started → needs_examples → practicing → mastered` (3 correct retrievals = mastered). Selection order: first unattempted → fewest-correct unmastered → oldest mastered for review. `shouldBeTemptation` fires at exactly 2 correct retrievals.
+- `web/src/lib/algorithm.ts` — skill selection. Status machine: `not_started → practicing → mastered` (3 correct retrievals = mastered). Selection order: first unattempted → fewest-correct unmastered → oldest mastered for review. `shouldBeTemptation` fires at exactly 2 correct retrievals.
 - `web/src/app/api/chat/route.ts` — spawns `claude -p` per message, parses `stream-json` output (`type: "assistant"` blocks become SSE `data:` lines), 90s timeout. Prompt is assembled from `tutor-prompt.md` plus context/skill/history/status/temptation/adaptive blocks.
 - `web/src/app/api/chat/tutor-prompt.md` — the tutoring system prompt with `{{context}}`, `{{skill}}`, `{{attemptHistory}}`, `{{status}}`, `{{temptationBlock}}`, `{{adaptiveBlock}}`, `{{taskBlock}}` placeholders.
 - `web/src/lib/chatStream.ts` — client-side SSE consumer. Also prefetches the first question for the next skill so the exercise view feels instant.

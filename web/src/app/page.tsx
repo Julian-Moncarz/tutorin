@@ -2,17 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Curriculum, Progress, SkillStatus } from '@/lib/types';
+import { getSkillName, getSkillStatus } from '@/lib/algorithm';
+import { Curriculum, ExamReadinessSummary, NextSkillRecommendation, Progress, SkillStatus } from '@/lib/types';
 import { startFirstQuestionPrefetch } from '@/lib/chatStream';
-
-function getSkillStatusClient(skill: string, progress: Progress): SkillStatus {
-  const p = progress[skill];
-  if (!p || p.attempts.length === 0) return 'not_started';
-  const correctCount = p.attempts.filter((a) => a.correct).length;
-  if (correctCount >= 3) return 'mastered';
-  if (p.attempts[0] && !p.attempts[0].correct && correctCount < 2) return 'needs_examples';
-  return 'practicing';
-}
 
 function StatusDot({ status }: { status: SkillStatus }) {
   if (status === 'mastered') {
@@ -22,7 +14,7 @@ function StatusDot({ status }: { status: SkillStatus }) {
       </svg>
     );
   }
-  if (status === 'practicing' || status === 'needs_examples') {
+  if (status === 'practicing') {
     return <span className="inline-block w-1.5 h-1.5 rounded-full bg-green flex-shrink-0" />;
   }
   return <span className="inline-block w-1.5 h-1.5 rounded-full bg-cream-dark flex-shrink-0" />;
@@ -32,7 +24,8 @@ export default function Dashboard() {
   const router = useRouter();
   const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
   const [progress, setProgress] = useState<Progress>({});
-  const [nextUp, setNextUp] = useState<{ skill: string; topic: string } | null>(null);
+  const [nextUp, setNextUp] = useState<NextSkillRecommendation | null>(null);
+  const [readiness, setReadiness] = useState<ExamReadinessSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,15 +33,17 @@ export default function Dashboard() {
       fetch('/api/curriculum').then((r) => r.json()),
       fetch('/api/progress').then((r) => r.json()),
       fetch('/api/next-skill').then((r) => r.json()),
+      fetch('/api/readiness').then((r) => r.json()),
     ])
-      .then(([c, p, n]) => {
+      .then(([c, p, n, readinessData]) => {
         if (c.error) setError(c.error);
         else setCurriculum(c);
         setProgress(p);
         if (n && !n.done && n.skill) {
-          setNextUp({ skill: n.skill, topic: n.topic });
+          setNextUp(n);
           startFirstQuestionPrefetch(n.skill);
         }
+        if (!readinessData?.error) setReadiness(readinessData);
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -73,8 +68,8 @@ export default function Dashboard() {
     );
   }
 
-  const allSkills = curriculum.topics.flatMap((t) => t.skills);
-  const mastered = allSkills.filter((s) => getSkillStatusClient(s, progress) === 'mastered').length;
+  const allSkills = curriculum.topics.flatMap((t) => t.skills.map(getSkillName));
+  const mastered = allSkills.filter((s) => getSkillStatus(s, progress, curriculum) === 'mastered').length;
   const total = allSkills.length;
 
   return (
@@ -105,6 +100,27 @@ export default function Dashboard() {
         </button>
       </div>
 
+      {readiness && (
+        <div className="mt-14 border border-cream-border bg-cream-raised/40 p-5">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted font-medium">
+            Exam readiness
+          </p>
+          <p className="mt-2 text-[26px] leading-none font-semibold text-charcoal">
+            {readiness.estimatedScoreLow}–{readiness.estimatedScoreHigh}%
+          </p>
+          <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
+            Biggest score gains left:
+            {' '}
+            {readiness.biggestGains.map((gain) => gain.skill).join(' • ')}
+          </p>
+          <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
+            Best next block:
+            {' '}
+            {readiness.nextThirtyMinutes.map((gain) => gain.skill).join(' • ')}
+          </p>
+        </div>
+      )}
+
       {/* All skills (ambient) */}
       <div className="mt-20">
         <p className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted/70 font-medium mb-5">
@@ -114,11 +130,12 @@ export default function Dashboard() {
           {curriculum.topics.map((topic) => {
             const N = topic.skills.length || 1;
             let t1c = 0, t2c = 0, t3c = 0;
-            for (const s of topic.skills) {
+            for (const rawSkill of topic.skills) {
+              const s = getSkillName(rawSkill);
               const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
               if (c >= 1) t1c++;
               if (c >= 2) t2c++;
-              if (c >= 3) t3c++;
+              if (getSkillStatus(s, progress, curriculum) === 'mastered') t3c++;
             }
             const tier1 = t1c / N;
             const tier2 = t2c / N;
@@ -167,8 +184,9 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <ul className="space-y-1.5">
-                  {topic.skills.map((skill) => {
-                    const status = getSkillStatusClient(skill, progress);
+                  {topic.skills.map((rawSkill) => {
+                    const skill = getSkillName(rawSkill);
+                    const status = getSkillStatus(skill, progress, curriculum);
                     return (
                       <li
                         key={skill}

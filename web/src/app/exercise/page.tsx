@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import MotivationPopup from '@/components/MotivationPopup';
 import PeelReveal from '@/components/PeelReveal';
+import { getSkillName } from '@/lib/algorithm';
 import { ChatMessage, Curriculum, Progress } from '@/lib/types';
 import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch } from '@/lib/chatStream';
 import { playCorrectChime } from '@/lib/audio';
@@ -32,7 +33,8 @@ function tieredFractionsForTopic(
   if (!topic || topic.skills.length === 0) return { tier1: 0, tier2: 0, tier3: 0 };
   const N = topic.skills.length;
   let t1 = 0, t2 = 0, t3 = 0;
-  for (const s of topic.skills) {
+  for (const rawSkill of topic.skills) {
+    const s = getSkillName(rawSkill);
     const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
     if (c >= 1) t1++;
     if (c >= 2) t2++;
@@ -494,6 +496,26 @@ export default function ExercisePage() {
     apply(pf);
   }, [loadNextSkill, doChat]);
 
+  const deleteSkill = async () => {
+    if (!skill || loading) return;
+    if (!confirm(`Delete skill "${skill}"? This removes it from the curriculum permanently.`)) return;
+    const toDelete = skill;
+    abortRef.current?.abort();
+    prefetchRef.current?.controller.abort();
+    prefetchRef.current = null;
+    try {
+      await fetch(`/api/skill?name=${encodeURIComponent(toDelete)}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed to delete skill:', err);
+    }
+    // Refresh curriculum in memory, then load next.
+    try {
+      const c = await fetch('/api/curriculum').then((r) => r.json());
+      if (!c.error) setCurriculum(c);
+    } catch {}
+    loadNextSkill();
+  };
+
   const handleNext = async () => {
     if (!skill || !topic || loading) return;
 
@@ -628,6 +650,21 @@ export default function ExercisePage() {
               className="flex-1 w-full bg-transparent text-[16px] text-charcoal leading-[1.7] resize-none focus:outline-none placeholder:text-charcoal-muted/40 min-h-[65vh]"
             />
             <div className="flex items-center justify-end gap-4 pt-4">
+              <button
+                onClick={deleteSkill}
+                disabled={loading || !skill}
+                title="Delete this skill"
+                aria-label="Delete this skill"
+                className="mr-auto p-2 text-charcoal-muted/60 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                  <path d="M10 11v6"></path>
+                  <path d="M14 11v6"></path>
+                  <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
               <span
                 className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
                   hasContent ? 'opacity-100' : 'opacity-0'

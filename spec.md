@@ -1,4 +1,4 @@
-cc# Tutorin — System Specification
+cccc# Tutorin — System Specification
 
 ## What it is
 A test-prep learning system that takes "I have this test" + files in a folder, interviews the user, generates a structured curriculum, then guides them through an optimized sequence of exercises via a web UI. Goal: ace any STEM/math/CS university exam in minimum time.
@@ -36,26 +36,58 @@ User runs Claude Code skill in a folder
     {
       "topic": "Determinants",
       "skills": [
-        "Compute the determinant of a 2x2 matrix",
-        "Compute the determinant of a 3x3 matrix using cofactor expansion",
-        "Explain how row operations affect the determinant and why"
+        {
+          "name": "Compute the determinant of a 2x2 matrix",
+          "examWeight": 8,
+          "timeCost": 0.8
+        },
+        {
+          "name": "Compute the determinant of a 3x3 matrix using cofactor expansion",
+          "examWeight": 12,
+          "timeCost": 1.1
+        },
+        {
+          "name": "Explain how row operations affect the determinant and why",
+          "examWeight": 10,
+          "timeCost": 0.9
+        }
       ]
     },
     {
       "topic": "Eigenvalues & Eigenvectors",
       "skills": [
-        "Explain geometrically what eigenvalues and eigenvectors represent",
-        "Compute eigenvalues of a 2x2 or 3x3 matrix",
-        "Find eigenvectors given eigenvalues",
-        "Explain why a matrix with repeated eigenvalues may not be diagonalizable",
-        "Diagonalize a matrix or explain why it cannot be diagonalized"
+        {
+          "name": "Explain geometrically what eigenvalues and eigenvectors represent",
+          "examWeight": 8,
+          "timeCost": 0.8
+        },
+        {
+          "name": "Compute eigenvalues of a 2x2 or 3x3 matrix",
+          "examWeight": 15,
+          "timeCost": 1.1
+        },
+        {
+          "name": "Find eigenvectors given eigenvalues",
+          "examWeight": 12,
+          "timeCost": 1
+        },
+        {
+          "name": "Explain why a matrix with repeated eigenvalues may not be diagonalizable",
+          "examWeight": 10,
+          "timeCost": 0.9
+        },
+        {
+          "name": "Diagonalize a matrix or explain why it cannot be diagonalized",
+          "examWeight": 25,
+          "timeCost": 1.2
+        }
       ]
     }
   ]
 }
 ```
 
-Skills are plain strings. Order in the array is dependency order. The verb in the description ("compute", "explain", "find") tells the AI what kind of problem to generate. Both procedural AND conceptual/explanatory skills are included — elaborative interrogation ("explain why X works") is just another skill.
+Each skill is an object. `name` is the human-readable skill, `examWeight` is the expected percentage of total exam marks attributable to that skill, and `timeCost` estimates relative minutes-to-meaningful-gain. Across the whole curriculum, `examWeight` should sum to about `100`. Order in the array is dependency order. The verb in the description ("compute", "explain", "find") tells the AI what kind of problem to generate. Both procedural AND conceptual/explanatory skills are included — elaborative interrogation ("explain why X works") is just another skill.
 
 The curriculum is a living document — the session AI can add prerequisite skills when it discovers gaps.
 
