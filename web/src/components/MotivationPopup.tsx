@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const INTERVAL_MS = 25 * 60 * 1000;
+const INTERVAL_MS = 50 * 60 * 1000;
 
 const feelings = [
   { label: 'Focused', value: 'focused', emoji: '\uD83C\uDFAF' },
@@ -48,7 +48,7 @@ export default function MotivationPopup() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-charcoal/30 backdrop-blur-sm">
       <div className="bg-cream border border-cream-border p-6 shadow-xl max-w-sm w-full mx-4">
         <p className="text-charcoal-secondary text-center mb-5 text-sm">
-          Quick check — how are you feeling?
+          Quick check. If you have been pushing for a while, this is a good time for a 10 minute break.
         </p>
         <div className="grid grid-cols-2 gap-2">
           {feelings.map((f) => (
