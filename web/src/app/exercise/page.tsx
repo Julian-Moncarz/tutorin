@@ -121,6 +121,11 @@ export default function ExercisePage() {
   const prefetchRef = useRef<PrefetchState | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  // Locally-tracked progress snapshot. Seeded from the server on mount, then
+  // updated optimistically after each attempt — so tier computations don't
+  // race with the background POST in startPrefetch.
+  const progressRef = useRef<Progress>({});
+  const progressLoadedRef = useRef(false);
 
   useEffect(() => () => {
     abortRef.current?.abort();
@@ -133,6 +138,30 @@ export default function ExercisePage() {
       .then((r) => r.json())
       .then((c) => { if (!c.error) setCurriculum(c); })
       .catch(() => {});
+  }, []);
+
+  // Seed the local progress snapshot from the server once on mount.
+  useEffect(() => {
+    fetch('/api/progress')
+      .then((r) => r.json())
+      .then((p: Progress) => {
+        if (p && !(p as any).error) progressRef.current = p;
+        progressLoadedRef.current = true;
+      })
+      .catch(() => {});
+  }, []);
+
+  // Ensure the pre-attempt progress snapshot is loaded. Falling back to a
+  // fresh fetch here is safe: it runs before any attempt is POSTed, so it
+  // always reflects pre-answer state.
+  const ensureProgressLoaded = useCallback(async () => {
+    if (progressLoadedRef.current) return;
+    try {
+      const res = await fetch('/api/progress');
+      const p: Progress = await res.json();
+      if (p && !(p as any).error) progressRef.current = p;
+    } catch {}
+    progressLoadedRef.current = true;
   }, []);
 
   useEffect(() => {
@@ -380,6 +409,8 @@ export default function ExercisePage() {
 
   const submitAnswer = async () => {
     if (!answer.trim() || !skill || loading) return;
+    // Snapshot pre-attempt progress before startPrefetch's POST can land.
+    await ensureProgressLoaded();
     const currentSkill = skill;
     const userMessage: DisplayMessage = {
       id: ++messageIdCounter,
@@ -480,40 +511,42 @@ export default function ExercisePage() {
       pf = prefetchRef.current;
     }
 
-    // Compute tiered fractions for the peel bar animation
-    let tiersAfter: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
+    // Compute tiered fractions from the local progress snapshot and simulate
+    // this attempt forward. Reading the server here would race with the
+    // background POST in startPrefetch and often leave the bar static.
     let tiersBefore: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
+    let tiersAfter: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
     if (curriculum) {
-      try {
-        const progressRes = await fetch('/api/progress');
-        const progressData: Progress = await progressRes.json();
-        tiersAfter = tieredFractionsForTopic(curriculum, progressData, topic);
-        const topicDef = curriculum.topics.find((t) => t.topic === topic);
-        if (topicDef && correct) {
-          // Reverse-derive: a single correct answer bumps exactly one tier by 1/N
-          const afterCorrect = (progressData[skill]?.attempts || []).filter((a) => a.correct).length;
-          const step = 1 / topicDef.skills.length;
-          tiersBefore = { ...tiersAfter };
-          if (afterCorrect === 1) tiersBefore.tier1 = Math.max(0, tiersAfter.tier1 - step);
-          else if (afterCorrect === 2) tiersBefore.tier2 = Math.max(0, tiersAfter.tier2 - step);
-          else if (afterCorrect === 3) tiersBefore.tier3 = Math.max(0, tiersAfter.tier3 - step);
-        } else if (topicDef) {
-          // Wrong: visual-only teaser. Nudge the tier that *would* have moved by 33% of 1/N.
-          tiersBefore = tiersAfter;
-          const currentCorrect = (progressData[skill]?.attempts || []).filter((a) => a.correct).length;
-          const step = 1 / topicDef.skills.length;
-          const nudge = step * 0.33;
-          const nudged = { ...tiersAfter };
-          if (currentCorrect === 0) nudged.tier1 = Math.min(1, tiersAfter.tier1 + nudge);
-          else if (currentCorrect === 1) nudged.tier2 = Math.min(1, tiersAfter.tier2 + nudge);
-          else if (currentCorrect === 2) nudged.tier3 = Math.min(1, tiersAfter.tier3 + nudge);
-          tiersAfter = nudged;
+      const progress = progressRef.current;
+      tiersBefore = tieredFractionsForTopic(curriculum, progress, topic);
+      const topicDef = curriculum.topics.find((t) => t.topic === topic);
+      if (topicDef) {
+        const existingCorrect = (progress[skill]?.attempts || []).filter((a) => a.correct).length;
+        const step = 1 / topicDef.skills.length;
+        tiersAfter = { ...tiersBefore };
+        if (correct) {
+          const nowCorrect = existingCorrect + 1;
+          if (nowCorrect === 1) tiersAfter.tier1 = Math.min(1, tiersBefore.tier1 + step);
+          else if (nowCorrect === 2) tiersAfter.tier2 = Math.min(1, tiersBefore.tier2 + step);
+          else if (nowCorrect === 3) tiersAfter.tier3 = Math.min(1, tiersBefore.tier3 + step);
         } else {
-          tiersBefore = tiersAfter;
+          // Wrong: visual-only teaser nudge on the tier that would have moved.
+          const nudge = step * 0.33;
+          if (existingCorrect === 0) tiersAfter.tier1 = Math.min(1, tiersBefore.tier1 + nudge);
+          else if (existingCorrect === 1) tiersAfter.tier2 = Math.min(1, tiersBefore.tier2 + nudge);
+          else if (existingCorrect === 2) tiersAfter.tier3 = Math.min(1, tiersBefore.tier3 + nudge);
         }
-      } catch (err) {
-        console.error('Failed to compute topic progress:', err);
+      } else {
+        tiersAfter = tiersBefore;
       }
+
+      // Optimistically record the attempt so subsequent tier computations stay
+      // in sync with what startPrefetch will persist.
+      if (!progress[skill]) progress[skill] = { attempts: [] };
+      progress[skill].attempts.push({
+        timestamp: new Date().toISOString(),
+        correct,
+      });
     }
 
     setPeel({ correct, topicName: topic, tiersBefore, tiersAfter, pf });
