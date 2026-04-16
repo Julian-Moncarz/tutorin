@@ -9,13 +9,22 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import MotivationPopup from '@/components/MotivationPopup';
 import PeelReveal from '@/components/PeelReveal';
+import WebcamCapture from '@/components/WebcamCapture';
 import { getSkillName } from '@/lib/algorithm';
 import { ChatMessage, Curriculum, Progress } from '@/lib/types';
-import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch } from '@/lib/chatStream';
+import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch, newSessionId, SessionExpiredError, endSession, endSessionOnUnload, abandonFirstQuestionPrefetch } from '@/lib/chatStream';
 import { playCorrectChime } from '@/lib/audio';
 
 function isCorrectMessage(text: string): boolean {
   return text.trimStart().startsWith('✅');
+}
+
+const PHOTO_TOKEN = '[[📷]]';
+function stripPhotoToken(text: string): string {
+  return text.split(PHOTO_TOKEN).join('').replace(/\n{3,}$/g, '\n\n').trimEnd();
+}
+function hasPhotoToken(text: string): boolean {
+  return text.includes(PHOTO_TOKEN);
 }
 
 interface Tiers {
@@ -54,11 +63,15 @@ interface PeelState {
 let messageIdCounter = 0;
 interface DisplayMessage extends ChatMessage {
   id: number;
+  imageDataUrl?: string;
 }
+
+const PHOTO_MESSAGE_TEXT = '📷 (photo of my work)';
 
 interface PrefetchState {
   nextSkill: string | null;
   nextTopic: string | null;
+  nextSessionId: string | null;
   text: string;
   completed: boolean;
   failed: boolean;
@@ -105,6 +118,8 @@ export default function ExercisePage() {
   const router = useRouter();
   const [skill, setSkill] = useState<string | null>(null);
   const [topic, setTopic] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const loadNextSkillRef = useRef<(() => void) | null>(null);
   const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
   const [peel, setPeel] = useState<PeelState | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -116,6 +131,8 @@ export default function ExercisePage() {
   const [allDone, setAllDone] = useState(false);
   const [leftPct, setLeftPct] = useState(42);
   const [focusMode, setFocusMode] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const autoOpenedForRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const answerRef = useRef<HTMLTextAreaElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -129,9 +146,24 @@ export default function ExercisePage() {
   const progressRef = useRef<Progress>({});
   const progressLoadedRef = useRef(false);
 
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    prefetchRef.current?.controller.abort();
+  useEffect(() => {
+    const handlePageHide = () => {
+      const id = sessionIdRef.current;
+      if (id) endSessionOnUnload(id);
+      const nextId = prefetchRef.current?.nextSessionId;
+      if (nextId) endSessionOnUnload(nextId);
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      abortRef.current?.abort();
+      prefetchRef.current?.controller.abort();
+      const id = sessionIdRef.current;
+      if (id) endSession(id);
+      const nextId = prefetchRef.current?.nextSessionId;
+      if (nextId) endSession(nextId);
+      abandonFirstQuestionPrefetch();
+    };
   }, []);
 
   // Load curriculum once for topic→fraction computations
@@ -224,32 +256,53 @@ export default function ExercisePage() {
           e.preventDefault();
           setFocusMode((v) => !v);
         }
+      } else if (mod && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        if (skill && !loading && !allDone && !initializing) {
+          e.preventDefault();
+          setCameraOpen(true);
+        }
       } else if (mod && (e.key === 'j' || e.key === 'J')) {
         if (submitted) {
           e.preventDefault();
           handleNext();
         }
-      } else if (e.key === 'Escape' && focusMode) {
+      } else if (e.key === 'Escape' && focusMode && !cameraOpen) {
         setFocusMode(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submitted, focusMode, messages, skill, loading]);
+  }, [submitted, focusMode, messages, skill, loading, allDone, initializing, cameraOpen]);
 
-  const doChat = useCallback(async (currentSkill: string, msgs: DisplayMessage[]): Promise<string> => {
+  // Auto-open camera when tutor emits [[📷]] in a completed message.
+  useEffect(() => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant) return;
+    if (!hasPhotoToken(lastAssistant.content)) return;
+    if (autoOpenedForRef.current === lastAssistant.id) return;
+    if (loading) return;
+    autoOpenedForRef.current = lastAssistant.id;
+    setCameraOpen(true);
+  }, [messages, loading]);
+
+  const doChat = useCallback(async (
+    currentSkill: string,
+    message: string | null,
+    image?: string
+  ): Promise<string> => {
     setLoading(true);
     setStreamingText('');
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const plainMsgs: ChatMessage[] = msgs.map(({ role, content }) => ({ role, content }));
       let chimed = false;
+      if (!sessionIdRef.current) sessionIdRef.current = newSessionId();
       const fullText = await streamChat(
         currentSkill,
-        plainMsgs,
+        message,
+        sessionIdRef.current,
         (text) => {
           setStreamingText(text);
           if (!chimed && isCorrectMessage(text)) {
@@ -257,7 +310,8 @@ export default function ExercisePage() {
             playCorrectChime();
           }
         },
-        controller.signal
+        controller.signal,
+        image
       );
       if (fullText) {
         setMessages((prev) => [
@@ -268,6 +322,16 @@ export default function ExercisePage() {
       return fullText;
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return '';
+      if (error instanceof SessionExpiredError) {
+        console.warn('Chat session expired, reloading skill');
+        setMessages((prev) => [
+          ...prev,
+          { id: ++messageIdCounter, role: 'assistant', content: 'This session timed out. Starting a fresh problem…' },
+        ]);
+        sessionIdRef.current = null;
+        setTimeout(() => loadNextSkillRef.current?.(), 800);
+        return '';
+      }
       console.error('Chat error:', error);
       setMessages((prev) => [
         ...prev,
@@ -282,12 +346,15 @@ export default function ExercisePage() {
 
   const consumeFirstPrefetch = useCallback((pf: QuestionPrefetch, topicName: string | null) => {
     setSkill(pf.skill);
+    const oldId = sessionIdRef.current;
+    if (oldId && oldId !== pf.sessionId) endSession(oldId);
+    sessionIdRef.current = pf.sessionId;
     if (topicName) setTopic(topicName);
     setInitializing(false);
     const finish = (s: QuestionPrefetch) => {
       if (s.failed || !s.text) {
         setStreamingText('');
-        doChat(s.skill, []).then(() => answerRef.current?.focus());
+        doChat(s.skill, null).then(() => answerRef.current?.focus());
         return;
       }
       setStreamingText('');
@@ -313,6 +380,9 @@ export default function ExercisePage() {
     setAnswer('');
     setChatInput('');
     setStreamingText('');
+    const oldId = sessionIdRef.current;
+    if (oldId) endSession(oldId);
+    sessionIdRef.current = null;
     try {
       const res = await fetch('/api/next-skill');
       const data = await res.json();
@@ -329,7 +399,7 @@ export default function ExercisePage() {
       setSkill(data.skill);
       setTopic(data.topic);
       setInitializing(false);
-      await doChat(data.skill, []);
+      await doChat(data.skill, null);
       answerRef.current?.focus();
     } catch (error) {
       console.error('Failed to load skill:', error);
@@ -338,11 +408,17 @@ export default function ExercisePage() {
   }, [doChat, consumeFirstPrefetch]);
 
   useEffect(() => {
+    loadNextSkillRef.current = loadNextSkill;
+  }, [loadNextSkill]);
+
+  useEffect(() => {
     loadNextSkill();
   }, [loadNextSkill]);
 
   const problem = messages.find((m) => m.role === 'assistant')?.content || '';
-  const firstAnswer = messages.find((m) => m.role === 'user')?.content || '';
+  const firstUserMsg = messages.find((m) => m.role === 'user');
+  const firstAnswer = firstUserMsg?.content || '';
+  const firstAnswerImage = firstUserMsg?.imageDataUrl;
   const feedbackMessages = (() => {
     let sawUser = false;
     return messages.filter((m) => {
@@ -364,6 +440,7 @@ export default function ExercisePage() {
     const state: PrefetchState = {
       nextSkill: null,
       nextTopic: null,
+      nextSessionId: null,
       text: '',
       completed: false,
       failed: false,
@@ -390,10 +467,12 @@ export default function ExercisePage() {
       }
       state.nextSkill = nextData.skill;
       state.nextTopic = nextData.topic ?? null;
+      state.nextSessionId = newSessionId();
       emit();
       const full = await streamChat(
         nextData.skill,
-        [],
+        null,
+        state.nextSessionId,
         (t) => { state.text = t; emit(); },
         controller.signal
       );
@@ -409,20 +488,23 @@ export default function ExercisePage() {
     }
   }, []);
 
-  const submitAnswer = async () => {
-    if (!answer.trim() || !skill || loading) return;
+  const submitAnswer = async (imageDataUrl?: string) => {
+    if (!skill || loading) return;
+    const text = imageDataUrl ? PHOTO_MESSAGE_TEXT : answer.trim();
+    if (!text) return;
     // Snapshot pre-attempt progress before startPrefetch's POST can land.
     await ensureProgressLoaded();
     const currentSkill = skill;
     const userMessage: DisplayMessage = {
       id: ++messageIdCounter,
       role: 'user',
-      content: answer.trim(),
+      content: text,
+      imageDataUrl,
     };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
-    setAnswer('');
-    const tutorText = await doChat(currentSkill, newMessages);
+    if (!imageDataUrl) setAnswer('');
+    const tutorText = await doChat(currentSkill, text, imageDataUrl);
     if (tutorText) {
       const assessMessages: ChatMessage[] = [
         ...newMessages.map(({ role, content }) => ({ role, content })),
@@ -433,21 +515,39 @@ export default function ExercisePage() {
     }
   };
 
-  const sendChat = async () => {
-    if (!chatInput.trim() || !skill || loading) return;
+  const sendChat = async (imageDataUrl?: string) => {
+    if (!skill || loading) return;
+    const text = imageDataUrl ? PHOTO_MESSAGE_TEXT : chatInput.trim();
+    if (!text) return;
     const userMessage: DisplayMessage = {
       id: ++messageIdCounter,
       role: 'user',
-      content: chatInput.trim(),
+      content: text,
+      imageDataUrl,
     };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
-    setChatInput('');
+    if (!imageDataUrl) setChatInput('');
     requestAnimationFrame(() => {
       chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-    await doChat(skill, newMessages);
+    await doChat(skill, text, imageDataUrl);
   };
+
+  const handleCameraCapture = useCallback(
+    (dataUrl: string) => {
+      setCameraOpen(false);
+      if (submitted) {
+        void sendChat(dataUrl);
+      } else {
+        void submitAnswer(dataUrl);
+      }
+    },
+    // submitAnswer/sendChat are unstable closures over setters/refs; listing
+    // their inputs instead so the handler always sees fresh state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [submitted, skill, loading, messages, answer, chatInput]
+  );
 
   const consumePrefetch = useCallback((pf: PrefetchState | null) => {
     if (!pf) {
@@ -456,6 +556,10 @@ export default function ExercisePage() {
     }
     prefetchRef.current = null;
     abortRef.current?.abort();
+    // We're transitioning off the current problem's session. Tear it down
+    // so the server subprocess doesn't linger.
+    const oldId = sessionIdRef.current;
+    if (oldId && oldId !== pf.nextSessionId) endSession(oldId);
     setMessages([]);
     setAnswer('');
     setChatInput('');
@@ -475,12 +579,13 @@ export default function ExercisePage() {
       }
       if (!s.nextSkill) return;
       setSkill(s.nextSkill);
+      sessionIdRef.current = s.nextSessionId;
       if (s.nextTopic) setTopic(s.nextTopic);
       setInitializing(false);
       if (s.completed) {
         if (s.failed || !s.text) {
           setStreamingText('');
-          doChat(s.nextSkill, []).then(() => answerRef.current?.focus());
+          doChat(s.nextSkill, null).then(() => answerRef.current?.focus());
         } else {
           setStreamingText('');
           setMessages([{ id: ++messageIdCounter, role: 'assistant', content: s.text }]);
@@ -501,6 +606,8 @@ export default function ExercisePage() {
     if (!confirm(`Delete skill "${skill}"? This removes it from the curriculum permanently.`)) return;
     const toDelete = skill;
     abortRef.current?.abort();
+    const orphanedNextId = prefetchRef.current?.nextSessionId;
+    if (orphanedNextId) endSession(orphanedNextId);
     prefetchRef.current?.controller.abort();
     prefetchRef.current = null;
     try {
@@ -631,7 +738,7 @@ export default function ExercisePage() {
               {initializing || (loading && !showProblem) ? (
                 <Dots />
               ) : (
-                <ProblemMarkdown>{showProblem}</ProblemMarkdown>
+                <ProblemMarkdown>{stripPhotoToken(showProblem)}</ProblemMarkdown>
               )}
             </div>
           </div>
@@ -665,6 +772,16 @@ export default function ExercisePage() {
                   <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
                 </svg>
               </button>
+              <button
+                onClick={() => setCameraOpen(true)}
+                disabled={loading || !skill}
+                title="Submit a photo of your work (⌘⇧C)"
+                aria-label="Submit a photo of your work"
+                className="flex items-center gap-2 px-3 py-2 text-[13px] text-charcoal-muted hover:text-charcoal transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <span>📷</span>
+                <span className="text-[11px] tabular-nums">⌘ + ⇧ + C</span>
+              </button>
               <span
                 className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
                   hasContent ? 'opacity-100' : 'opacity-0'
@@ -673,7 +790,7 @@ export default function ExercisePage() {
                 ⌘ + ↵
               </span>
               <button
-                onClick={submitAnswer}
+                onClick={() => submitAnswer()}
                 disabled={!hasContent}
                 className={`px-6 py-2.5 text-[14px] font-semibold transition-all active:scale-[0.98] ${
                   hasContent
@@ -695,6 +812,11 @@ export default function ExercisePage() {
             onRevealed={onPeelRevealed}
           />
         )}
+        <WebcamCapture
+          open={cameraOpen}
+          onCancel={() => setCameraOpen(false)}
+          onCapture={handleCameraCapture}
+        />
       </div>
     );
   }
@@ -713,15 +835,24 @@ export default function ExercisePage() {
               className="overflow-y-auto px-10 pt-24 pb-10"
             >
               <div className="max-w-[460px] ml-auto space-y-8">
-                <ProblemMarkdown dim>{problem}</ProblemMarkdown>
+                <ProblemMarkdown dim>{stripPhotoToken(problem)}</ProblemMarkdown>
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.22em] text-charcoal-muted/70 font-medium mb-3">
                     Your answer
                   </p>
                   <div className="border-l-2 border-green/40 pl-4">
-                    <p className="text-[15px] text-charcoal-secondary leading-[1.7] whitespace-pre-wrap">
-                      {firstAnswer}
-                    </p>
+                    {firstAnswerImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={firstAnswerImage}
+                        alt="Photo of your work"
+                        className="max-w-full max-h-[360px] border border-cream-border"
+                      />
+                    ) : (
+                      <p className="text-[15px] text-charcoal-secondary leading-[1.7] whitespace-pre-wrap">
+                        {firstAnswer}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -759,19 +890,28 @@ export default function ExercisePage() {
               {feedbackMessages.map((msg) =>
                 msg.role === 'assistant' ? (
                   <div key={msg.id} className="animate-fade-up">
-                    <TutorMarkdown>{msg.content}</TutorMarkdown>
+                    <TutorMarkdown>{stripPhotoToken(msg.content)}</TutorMarkdown>
                   </div>
                 ) : (
                   <div key={msg.id} className="animate-fade-up flex justify-end">
-                    <p className="max-w-[80%] text-[15px] text-charcoal-secondary leading-[1.65] whitespace-pre-wrap bg-cream-raised/70 px-4 py-2.5 rounded-sm">
-                      {msg.content}
-                    </p>
+                    {msg.imageDataUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={msg.imageDataUrl}
+                        alt="Photo of your work"
+                        className="max-w-[80%] max-h-[320px] border border-cream-border rounded-sm"
+                      />
+                    ) : (
+                      <p className="max-w-[80%] text-[15px] text-charcoal-secondary leading-[1.65] whitespace-pre-wrap bg-cream-raised/70 px-4 py-2.5 rounded-sm">
+                        {msg.content}
+                      </p>
+                    )}
                   </div>
                 )
               )}
               {streamingText && (
                 <div className="animate-fade-up">
-                  <TutorMarkdown>{streamingText}</TutorMarkdown>
+                  <TutorMarkdown>{stripPhotoToken(streamingText)}</TutorMarkdown>
                 </div>
               )}
               {loading && !streamingText && <Dots />}
@@ -797,7 +937,17 @@ export default function ExercisePage() {
                   placeholder="Ask a question or think out loud…"
                   className="w-full bg-transparent text-[15px] text-charcoal placeholder:text-charcoal-muted/45 resize-none focus:outline-none disabled:opacity-40 leading-relaxed"
                 />
-                <div className="flex items-center justify-end pt-2">
+                <div className="flex items-center justify-end gap-4 pt-2">
+                  <button
+                    onClick={() => setCameraOpen(true)}
+                    disabled={loading || !skill}
+                    title="Submit a photo of your work (⌘⇧C)"
+                    aria-label="Submit a photo of your work"
+                    className="flex items-center gap-1.5 text-[11px] text-charcoal-muted/70 hover:text-charcoal transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <span>📷</span>
+                    <span className="tabular-nums">⌘ + ⇧ + C</span>
+                  </button>
                   <span
                     className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
                       chatInput.trim() ? 'opacity-100' : 'opacity-0'
@@ -820,6 +970,11 @@ export default function ExercisePage() {
           onRevealed={onPeelRevealed}
         />
       )}
+      <WebcamCapture
+        open={cameraOpen}
+        onCancel={() => setCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
     </div>
   );
 }

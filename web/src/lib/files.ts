@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { Curriculum, Progress, MotivationLog, ChatMessage } from './types';
 
 function getStudyDir(): string {
@@ -73,6 +74,29 @@ export function logConversation(
     path.join(logsDir, filename),
     JSON.stringify({ skill, correct, timestamp: new Date().toISOString(), messages }, null, 2)
   );
+}
+
+// Save a student-submitted photo (given as a data URL or raw base64 of a JPEG/PNG)
+// to $STUDY_DIR/logs/photos/<timestamp>.<ext>. Returns the absolute path.
+export function saveStudentPhoto(dataUrlOrBase64: string): string {
+  const photosDir = path.join(getStudyDir(), 'logs', 'photos');
+  if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+
+  let ext = 'jpg';
+  let base64 = dataUrlOrBase64;
+  const match = /^data:image\/(png|jpeg|jpg|webp);base64,(.*)$/i.exec(dataUrlOrBase64);
+  if (match) {
+    const fmt = match[1].toLowerCase();
+    ext = fmt === 'jpeg' ? 'jpg' : fmt;
+    base64 = match[2];
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const suffix = crypto.randomBytes(3).toString('hex');
+  const filename = `${timestamp}-${suffix}.${ext}`;
+  const filePath = path.join(photosDir, filename);
+  fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+  return filePath;
 }
 
 export function logMotivation(entry: MotivationLog): void {

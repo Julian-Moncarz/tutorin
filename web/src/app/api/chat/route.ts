@@ -1,30 +1,30 @@
-import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
-import { getContext, getCurriculum, getProgress } from '@/lib/files';
+import { getContext, getCurriculum, getProgress, saveStudentPhoto } from '@/lib/files';
 import { getSkillStatus, shouldBeTemptation } from '@/lib/algorithm';
-import { ChatMessage } from '@/lib/types';
+import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
 
-const CLAUDE_TIMEOUT_MS = 90_000;
-
-const PROMPT_TEMPLATE = readFileSync(
-  path.join(process.cwd(), 'src/app/api/chat/tutor-prompt.md'),
+const TURN1_TEMPLATE = readFileSync(
+  path.join(process.cwd(), 'src/app/api/chat/tutor-turn1-template.md'),
   'utf8'
 );
 
-function buildPrompt(
+const SYSTEM_PROMPT_TEMPLATE = readFileSync(
+  path.join(process.cwd(), 'src/app/api/chat/tutor-system-prompt.md'),
+  'utf8'
+);
+
+function buildSystemPrompt(): string {
+  return SYSTEM_PROMPT_TEMPLATE.replace('{{context}}', getContext());
+}
+
+function renderTurn1(
   skill: string,
-  messages: ChatMessage[],
-  context: string,
   attemptHistory: string,
   status: string,
   isTemptation: boolean
 ): string {
-  const conversationText = messages
-    .map((m) => `${m.role === 'user' ? 'Student' : 'Tutor'}: ${m.content}`)
-    .join('\n\n');
-
   const temptationBlock = isTemptation
     ? '\n** THIS SHOULD BE A TEMPTATION PROBLEM: Generate a problem that LOOKS like this skill but actually requires a different approach. Test whether the student can discriminate between similar-looking problems. **\n'
     : '';
@@ -40,26 +40,35 @@ function buildPrompt(
     .filter(Boolean)
     .join('\n');
 
-  const taskBlock =
-    messages.length === 0
-      ? `## Task\nWrite ONE minimal exam-style problem that tests the skill: "${skill}".\n\n- Output ONLY the problem statement. No title, no preamble, no meta-commentary, no hints, no encouragement, no closing remarks.\n- Keep it as short as possible while still testing the skill. Match the test's style/notation. Multi-part is fine if the skill description has multiple parts.\n- Do not include "Notes:" or guidance about how to approach it.`
-      : `## Conversation So Far\n${conversationText}\n\nRespond to the student's latest message following the guidelines above.`;
-
-  return PROMPT_TEMPLATE
-    .replace('{{context}}', context)
-    .replace('{{skill}}', skill)
+  return TURN1_TEMPLATE
+    .replace(/\{\{skill\}\}/g, skill)
     .replace('{{attemptHistory}}', attemptHistory)
     .replace('{{status}}', status)
     .replace('{{temptationBlock}}', temptationBlock)
-    .replace('{{adaptiveBlock}}', adaptiveBlock)
-    .replace('{{taskBlock}}', taskBlock);
+    .replace('{{adaptiveBlock}}', adaptiveBlock);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const skill = String(body.skill || '');
-    const messages: ChatMessage[] = Array.isArray(body.messages) ? body.messages : [];
+    const sessionId = String(body.sessionId || '');
+    const rawMessage = body.message;
+    const message: string | null =
+      rawMessage === null || rawMessage === undefined
+        ? null
+        : typeof rawMessage === 'string'
+          ? rawMessage
+          : null;
+    const image = typeof body.image === 'string' && body.image.length > 0 ? body.image : null;
+
+    const MAX_IMAGE_BYTES = 12_000_000; // ~12 MB of base64 ≈ 9 MB binary
+    if (image && image.length > MAX_IMAGE_BYTES) {
+      return new Response(JSON.stringify({ error: 'image too large' }), {
+        status: 413,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     if (!skill) {
       return new Response(JSON.stringify({ error: 'skill is required' }), {
@@ -67,103 +76,110 @@ export async function POST(req: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    if (!sessionId) {
+      return new Response(JSON.stringify({ error: 'sessionId is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    const context = getContext();
-    const curriculum = getCurriculum();
-    const progress = getProgress();
-    const status = getSkillStatus(skill, progress, curriculum);
-    const isTemptation = shouldBeTemptation(skill, progress);
+    const { session, isNew } = getOrCreateSession(sessionId, buildSystemPrompt);
 
-    const attemptHistory =
-      progress[skill]?.attempts
-        .map((a, i) => `Attempt ${i + 1}: ${a.correct ? 'Correct' : 'Incorrect'} (${a.timestamp})`)
-        .join('\n') || 'No previous attempts.';
+    // message === null  → "start a new session, generate first problem" (isNew must be true)
+    // message !== null  → "student reply in an existing session" (isNew must be false)
+    if (isNew && message !== null) {
+      // Client has a message to send but the server doesn't know this session —
+      // it was swept, the server restarted, or the client hand-rolled a bad id.
+      // Delete the accidental new-session and tell the client to start fresh.
+      console.warn(`[chat] session ${sessionId} not on server but client sent a message — returning 409`);
+      deleteSession(sessionId);
+      return new Response(
+        JSON.stringify({ error: 'session expired', code: 'session_expired' }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (!isNew && message === null) {
+      return new Response(
+        JSON.stringify({ error: 'message required for existing session' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
-    const prompt = buildPrompt(skill, messages, context, attemptHistory, status, isTemptation);
+    // Photo only applies to follow-ups — a fresh session has no problem yet
+    // for the student to have worked on.
+    let photoPath: string | null = null;
+    if (image && !isNew) {
+      try {
+        photoPath = saveStudentPhoto(image);
+      } catch (err) {
+        console.error('[chat] failed to save student photo:', err);
+        return new Response(JSON.stringify({ error: 'failed to save photo' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    } else if (image && isNew) {
+      console.warn(`[chat] new session ${sessionId} received a photo — ignoring (problem must be generated first)`);
+    }
+    const photoLine = photoPath
+      ? `\n\nAttached photo of my work at ${photoPath} — please read that file.`
+      : '';
 
-    const proc = spawn('claude', ['-p', '--verbose', '--output-format', 'stream-json'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-
-    // Kill process after timeout
-    const timeout = setTimeout(() => {
-      proc.kill('SIGTERM');
-    }, CLAUDE_TIMEOUT_MS);
+    let userMessage: string;
+    if (isNew) {
+      const curriculum = getCurriculum();
+      const progress = getProgress();
+      const status = getSkillStatus(skill, progress, curriculum);
+      const isTemptation = shouldBeTemptation(skill, progress);
+      const attemptHistory =
+        progress[skill]?.attempts
+          .map((a, i) => `Attempt ${i + 1}: ${a.correct ? 'Correct' : 'Incorrect'} (${a.timestamp})`)
+          .join('\n') || 'No previous attempts.';
+      userMessage = renderTurn1(skill, attemptHistory, status, isTemptation);
+    } else {
+      userMessage = (message as string) + photoLine;
+    }
 
     const encoder = new TextEncoder();
-    let buffer = '';
-    let closed = false;
-    let sentText = false;
-
     const stream = new ReadableStream({
-      start(controller) {
-        function safeEnqueue(data: Uint8Array) {
-          if (!closed) controller.enqueue(data);
-        }
+      async start(controller) {
+        let closed = false;
+        const safeEnqueue = (data: Uint8Array) => {
+          if (closed) return;
+          try { controller.enqueue(data); } catch { closed = true; }
+        };
+        const safeClose = () => {
+          if (!closed) { closed = true; try { controller.close(); } catch { /* already closed */ } }
+        };
 
-        function safeClose() {
-          if (!closed) {
-            closed = true;
-            clearTimeout(timeout);
-            controller.close();
-          }
-        }
-
-        function safeError(err: Error) {
-          if (!closed) {
-            closed = true;
-            clearTimeout(timeout);
-            controller.error(err);
-          }
-        }
-
-        function processLine(line: string) {
-          if (!line.trim()) return;
-          try {
-            const parsed = JSON.parse(line);
-            // Handle claude CLI --verbose --output-format stream-json
-            if (parsed.type === 'assistant' && parsed.message?.content) {
-              for (const block of parsed.message.content) {
-                if (block.type === 'text' && block.text) {
-                  sentText = true;
-                  safeEnqueue(encoder.encode(`data: ${JSON.stringify({ text: block.text })}\n\n`));
-                }
-              }
-            } else if (parsed.type === 'result' && parsed.result && !sentText) {
-              // Final result fallback — only if no assistant message was sent
-              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ text: parsed.result })}\n\n`));
+        try {
+          await session.send(userMessage, (evt) => {
+            if (evt.type === 'text') {
+              safeEnqueue(
+                encoder.encode(`data: ${JSON.stringify({ text: evt.text })}\n\n`)
+              );
+            } else if (evt.type === 'busy') {
+              console.warn(`[chat] session ${sessionId} is busy — concurrent turn rejected`);
+              safeEnqueue(
+                encoder.encode(`data: ${JSON.stringify({ error: 'session busy' })}\n\n`)
+              );
+            } else if (evt.type === 'error') {
+              console.error(`[chat] session error for ${sessionId}: ${evt.error}`);
+              deleteSession(sessionId);
             }
-          } catch {
-            // Not valid JSON or unexpected format
-          }
-        }
-
-        proc.stdout.on('data', (chunk: Buffer) => {
-          buffer += chunk.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            processLine(line);
-          }
-        });
-
-        proc.stderr.on('data', (d: Buffer) => {
-          console.error('claude stderr:', d.toString());
-        });
-
-        proc.on('close', () => {
-          if (buffer.trim()) processLine(buffer);
+            // done: nothing to emit; the promise will resolve
+          });
+        } catch (err) {
+          console.error('[chat] stream error', err);
+        } finally {
           safeEnqueue(encoder.encode('data: [DONE]\n\n'));
           safeClose();
-        });
-
-        proc.on('error', (err) => {
-          console.error('claude process error:', err);
-          safeError(err);
-        });
+        }
+      },
+      cancel() {
+        // Client closed the stream. Do NOT kill the subprocess — let the
+        // turn run to completion so the session stays usable and busy clears
+        // naturally. safeEnqueue will no-op once the controller is closed.
       },
     });
 
