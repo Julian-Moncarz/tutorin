@@ -519,7 +519,7 @@ export default function FeedbackButton() {
               {fullscreen ? (
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path
-                    d="M5 1 L5 5 L1 5 M9 5 L13 5 L13 1 M13 9 L9 9 L9 13 M5 13 L5 9 L1 9"
+                    d="M5 1 L5 5 L1 5 M9 1 L9 5 L13 5 M13 9 L9 9 L9 13 M5 13 L5 9 L1 9"
                     stroke="currentColor"
                     strokeWidth="1.5"
                     strokeLinecap="round"
