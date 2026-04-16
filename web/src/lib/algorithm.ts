@@ -9,7 +9,14 @@ import {
   WeakSpot,
 } from './types';
 
-const DEFAULT_MASTERY_THRESHOLD = 3;
+// Cram mode (current default): one correct attempt retires a skill
+// for the rest of cramming. No more "nailed it, got asked again."
+const DEFAULT_MASTERY_THRESHOLD = 1;
+
+// After any attempt on a skill, it sits out for this many subsequent
+// attempts (across all skills) before it's eligible to be served again.
+// Enforces a real retrieval gap after a walkthrough instead of an echo.
+const COOLDOWN_ATTEMPTS = 5;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -60,16 +67,12 @@ export function getCorrectCount(skillName: string, progress: Progress): number {
 }
 
 export function getMasteryTarget(skillName: string, curriculum?: Curriculum): number {
-  if (!curriculum) return DEFAULT_MASTERY_THRESHOLD;
-
-  const definition = getSkillDefinition(curriculum, skillName)?.skill;
-  if (!definition) throw new Error(`Missing skill metadata for "${skillName}"`);
-  const examWeight = definition.examWeight;
-  const timeCost = definition.timeCost;
-
-  if (examWeight >= 3 || timeCost >= 1.3) return 3;
-  if (examWeight >= 1) return 2;
-  return 1;
+  // Cram mode: one correct attempt retires a skill, regardless of weight or cost.
+  // The adaptive 1–3 scaling lived here before; it's parked until we
+  // introduce a non-cram session mode.
+  void skillName;
+  void curriculum;
+  return DEFAULT_MASTERY_THRESHOLD;
 }
 
 export function getSkillSignals(
@@ -91,10 +94,10 @@ export function getSkillSignals(
   else if (correctCount >= masteryTarget) deficit = 0.08;
   else deficit = clamp(0.82 - (correctCount - 1) * 0.28, 0.2, 0.82);
 
-  const flowBoost =
-    attempts.length > 0 && correctCount < masteryTarget && attempts[attempts.length - 1]?.correct
-      ? 1.08
-      : 1;
+  // flowBoost used to nudge the algorithm toward re-serving a skill right
+  // after a correct attempt. In cram mode that's actively wrong: it was
+  // the mechanism behind "just got it right, got asked again." Parked at 1.
+  const flowBoost = 1;
 
   const roi = (examWeight * deficit * flowBoost) / timeCost;
 
@@ -153,6 +156,21 @@ export function getAllSkillsOrdered(curriculum: Curriculum): { topic: string; sk
   return result;
 }
 
+// Skills attempted in the last COOLDOWN_ATTEMPTS attempts (across all
+// skills) are on cooldown. This enforces "see it again only after a few
+// other problems," so the next encounter is a real retrieval test.
+function getSkillsOnCooldown(progress: Progress): Set<string> {
+  const allAttempts: { skill: string; timestamp: string }[] = [];
+  for (const [skill, record] of Object.entries(progress)) {
+    for (const attempt of record?.attempts || []) {
+      allAttempts.push({ skill, timestamp: attempt.timestamp });
+    }
+  }
+  allAttempts.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const recent = allAttempts.slice(-COOLDOWN_ATTEMPTS);
+  return new Set(recent.map((a) => a.skill));
+}
+
 export function getNextSkill(
   curriculum: Curriculum,
   progress: Progress
@@ -160,8 +178,19 @@ export function getNextSkill(
   const allSkills = getAllSkillsOrdered(curriculum);
   if (allSkills.length === 0) return null;
 
-  const active = allSkills
-    .filter(({ skill }) => getSkillStatus(skill, progress, curriculum) !== 'mastered')
+  const cooldown = getSkillsOnCooldown(progress);
+
+  const nonMastered = allSkills.filter(
+    ({ skill }) => getSkillStatus(skill, progress, curriculum) !== 'mastered'
+  );
+
+  // Prefer skills that aren't on cooldown. Fall back to the full
+  // non-mastered set only if cooldown would leave us with nothing
+  // (e.g. early in a session before 5 attempts have accumulated).
+  const eligible = nonMastered.filter(({ skill }) => !cooldown.has(skill));
+  const pool = eligible.length > 0 ? eligible : nonMastered;
+
+  const active = pool
     .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
     .sort((a, b) => b.roi - a.roi);
 
