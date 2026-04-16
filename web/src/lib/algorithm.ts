@@ -184,17 +184,30 @@ export function getNextSkill(
     ({ skill }) => getSkillStatus(skill, progress, curriculum) !== 'mastered'
   );
 
-  // Prefer skills that aren't on cooldown. Fall back to the full
-  // non-mastered set only if cooldown would leave us with nothing
-  // (e.g. early in a session before 5 attempts have accumulated).
+  // Prefer skills that aren't on cooldown and rank by ROI.
   const eligible = nonMastered.filter(({ skill }) => !cooldown.has(skill));
-  const pool = eligible.length > 0 ? eligible : nonMastered;
 
-  const active = pool
-    .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
-    .sort((a, b) => b.roi - a.roi);
+  if (eligible.length > 0) {
+    const ranked = eligible
+      .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
+      .sort((a, b) => b.roi - a.roi);
+    return ranked[0];
+  }
 
-  if (active.length > 0) return active[0];
+  // Stranded pool: every non-mastered skill is on cooldown (e.g. the
+  // curriculum has fewer than COOLDOWN_ATTEMPTS non-mastered skills left).
+  // Don't strand the user. Serve the one attempted longest ago so it at
+  // least maximizes the retrieval gap we can offer.
+  if (nonMastered.length > 0) {
+    const byOldest = nonMastered
+      .map(({ skill }) => ({
+        skill,
+        lastTimestamp:
+          progress[skill]?.attempts.slice(-1)[0]?.timestamp || '',
+      }))
+      .sort((a, b) => a.lastTimestamp.localeCompare(b.lastTimestamp));
+    return buildRecommendation(curriculum, progress, byOldest[0].skill);
+  }
 
   const mastered = allSkills
     .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
