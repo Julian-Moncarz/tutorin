@@ -69,8 +69,6 @@ export default function Dashboard() {
   }
 
   const allSkills = curriculum.topics.flatMap((t) => t.skills.map(getSkillName));
-  const mastered = allSkills.filter((s) => getSkillStatus(s, progress, curriculum) === 'mastered').length;
-  const total = allSkills.length;
 
   return (
     <div className="min-h-screen max-w-xl mx-auto px-6 pt-24 pb-16">
@@ -95,7 +93,7 @@ export default function Dashboard() {
           onClick={() => router.push('/exercise')}
           className="mt-4 inline-flex items-center gap-2 px-7 py-3.5 bg-green text-white text-[15px] font-semibold hover:bg-green-hover active:scale-[0.98] transition-all shadow-sm hover:shadow"
         >
-          {mastered === 0 ? 'Start' : 'Continue'}
+          Start
           <span aria-hidden>→</span>
         </button>
       </div>
