@@ -15,4 +15,5 @@ out
 # only prevents new log files and photo uploads from cluttering git status.
 test-study/logs/*.json
 test-study/logs/photos/
+.study/
 test-study/feedback/
