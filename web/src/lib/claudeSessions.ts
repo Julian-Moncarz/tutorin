@@ -70,6 +70,7 @@ export class ClaudeSession {
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
+      '--effort', 'medium',
       '--system-prompt', this.systemPrompt,
       '--dangerously-skip-permissions',
     ];
@@ -246,7 +247,11 @@ export class ClaudeSession {
 // them (via /api/chat/session) or the Node process exits. No idle sweeper —
 // clients are expected to tear down on Next, page unmount, and tab close
 // (via fetch keepalive:true).
-const sessions = new Map<string, ClaudeSession>();
+// Pinned to globalThis so Next.js dev module re-evaluation (first-time
+// compile of a route that also imports this module) doesn't orphan the Map.
+const sessions: Map<string, ClaudeSession> =
+  ((globalThis as unknown) as { __tutorinSessions?: Map<string, ClaudeSession> })
+    .__tutorinSessions ??= new Map<string, ClaudeSession>();
 
 export function getOrCreateSession(
   id: string,

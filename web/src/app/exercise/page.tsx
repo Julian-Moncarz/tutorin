@@ -137,6 +137,7 @@ export default function ExercisePage() {
   const answerRef = useRef<HTMLTextAreaElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const loadingNextRef = useRef(false);
   const prefetchRef = useRef<PrefetchState | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -147,7 +148,10 @@ export default function ExercisePage() {
   const progressLoadedRef = useRef(false);
 
   useEffect(() => {
-    const handlePageHide = () => {
+    const handlePageHide = (e: PageTransitionEvent) => {
+      // Skip teardown when the page is being paused into bfcache — the user
+      // switched tabs / minimized and can resume instantly with live state.
+      if (e.persisted) return;
       const id = sessionIdRef.current;
       if (id) endSessionOnUnload(id);
       const nextId = prefetchRef.current?.nextSessionId;
@@ -298,7 +302,13 @@ export default function ExercisePage() {
     abortRef.current = controller;
     try {
       let chimed = false;
-      if (!sessionIdRef.current) sessionIdRef.current = newSessionId();
+      if (message === null) {
+        const stale = sessionIdRef.current;
+        if (stale) endSession(stale);
+        sessionIdRef.current = newSessionId();
+      } else if (!sessionIdRef.current) {
+        sessionIdRef.current = newSessionId();
+      }
       const fullText = await streamChat(
         currentSkill,
         message,
@@ -375,6 +385,8 @@ export default function ExercisePage() {
   }, [doChat]);
 
   const loadNextSkill = useCallback(async () => {
+    if (loadingNextRef.current) return;
+    loadingNextRef.current = true;
     setInitializing(true);
     setMessages([]);
     setAnswer('');
@@ -404,6 +416,8 @@ export default function ExercisePage() {
     } catch (error) {
       console.error('Failed to load skill:', error);
       setInitializing(false);
+    } finally {
+      loadingNextRef.current = false;
     }
   }, [doChat, consumeFirstPrefetch]);
 
