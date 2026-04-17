@@ -6,8 +6,12 @@
   - Local:        http://localhost:3003
 
  ✓ Starting...
- ✓ Ready in 1824ms
+ ✓ Ready in 1671ms
  ○ Compiling / ...
- ✓ Compiled / in 1513ms (1155 modules)
- GET / 200 in 1644ms
- ✓ Compiled in 151ms (599 modules)
+ ✓ Compiled / in 1553ms (1155 modules)
+ GET / 200 in 1689ms
+ ✓ Compiled in 190ms (599 modules)
+ ✓ Compiled in 91ms (599 modules)
+ ✓ Compiled in 108ms (599 modules)
+ ✓ Compiled in 88ms (599 modules)
+ ✓ Compiled in 93ms (599 modules)
