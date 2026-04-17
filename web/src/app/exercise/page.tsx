@@ -16,7 +16,9 @@ import { streamChat, takeFirstQuestionPrefetch, QuestionPrefetch, newSessionId, 
 import { playCorrectChime } from '@/lib/audio';
 
 function isCorrectMessage(text: string): boolean {
-  return text.trimStart().startsWith('✅');
+  // ✅ is reserved as the correctness marker; the tutor places it at the end
+  // of the message (after any 💡 feedback) so feedback reads before the check.
+  return text.includes('✅');
 }
 
 interface Tiers {
