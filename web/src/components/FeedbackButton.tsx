@@ -166,9 +166,9 @@ export default function FeedbackButton() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [streamingTools, setStreamingTools] = useState<ToolEvent[]>([]);
-  // True only between "turn started" and "first text/tool event arrived." Used
-  // to show dots during the initial wait without flashing them every time a
-  // transient tool line clears mid-turn.
+  // True only between "turn started" and "first text/tool event arrived."
+  // Drives the dots during the initial wait; once a tool or text appears,
+  // those carry the "still working" signal.
   const [awaitingFirstEvent, setAwaitingFirstEvent] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -277,14 +277,6 @@ export default function FeedbackButton() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      // Accumulate tools in a closure-local array so the completion handler
-      // attaches the final list to the assistant message without racing React
-      // state updates.
-      // Minimum time a tool line stays on screen, so fast calls (Read a small
-      // file, short Grep) don't just flash and disappear. Any tool that
-      // completes sooner is held back from removal until this deadline.
-      const MIN_TOOL_VISIBLE_MS = 600;
-      const toolShownAt = new Map<string, number>();
       try {
         const full = await streamFeedback(
           sessionId,
@@ -296,19 +288,15 @@ export default function FeedbackButton() {
             },
             onTool: (ev) => {
               setAwaitingFirstEvent(false);
-              toolShownAt.set(ev.id, Date.now());
               setStreamingTools((prev) => [...prev, ev]);
             },
-            onToolDone: (id) => {
-              // Transient: remove once the minimum visible window has passed.
-              // Errors surface via onError, not the tool line.
-              const elapsed = Date.now() - (toolShownAt.get(id) ?? Date.now());
-              const remaining = Math.max(0, MIN_TOOL_VISIBLE_MS - elapsed);
-              toolShownAt.delete(id);
-              const remove = () =>
-                setStreamingTools((prev) => prev.filter((t) => t.id !== id));
-              if (remaining === 0) remove();
-              else setTimeout(remove, remaining);
+            onToolDone: (id, isError) => {
+              // Mark done (stops the pulse dot) but keep the line on screen
+              // so the reader can see what happened. The whole stack clears
+              // when the turn finishes.
+              setStreamingTools((prev) =>
+                prev.map((t) => (t.id === id ? { ...t, done: true, isError } : t))
+              );
             },
             onError: (msg) => {
               setMessages((prev) => [
@@ -617,8 +605,9 @@ export default function FeedbackButton() {
             </div>
           )}
           {/* Dots only appear during the initial wait for a turn's first
-              event. After that, tool lines and streaming text carry the weight;
-              mid-turn gaps stay quiet so the UI doesn't feel frantic. */}
+              event. After that, the growing tool stack and streaming text
+              carry the weight; mid-turn gaps stay quiet so the UI doesn't
+              feel frantic. */}
           {loading && awaitingFirstEvent && <Dots />}
           <div ref={bottomRef} />
         </div>
