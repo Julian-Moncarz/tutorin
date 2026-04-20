@@ -17,3 +17,4 @@ test-study/logs/*.json
 test-study/logs/photos/
 .study/
 test-study/feedback/
+dev.log
