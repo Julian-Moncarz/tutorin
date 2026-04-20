@@ -8,44 +8,11 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ChatMessage } from '@/lib/types';
-import { deleteFeedbackSession, streamFeedback, ToolEvent } from '@/lib/feedbackStream';
+import { deleteFeedbackSession, streamFeedback } from '@/lib/feedbackStream';
 
 let msgIdCounter = 0;
 interface DisplayMessage extends ChatMessage {
   id: number;
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '…';
-}
-
-function ToolLine({ tool, summary, done, isError }: ToolEvent) {
-  const verb =
-    tool === 'Bash' ? 'Running' :
-    tool === 'Read' ? 'Reading' :
-    tool === 'Edit' ? 'Editing' :
-    tool === 'Write' ? 'Writing' :
-    tool === 'Grep' ? 'Searching' :
-    tool === 'Glob' ? 'Searching' :
-    tool === 'WebFetch' ? 'Fetching' :
-    tool === 'Task' ? 'Thinking' :
-    tool;
-  return (
-    <div className={`text-[12px] italic leading-[1.5] flex items-center gap-1.5 ${
-      isError ? 'text-danger' : 'text-charcoal-muted'
-    }`}>
-      {!done && (
-        <span className="inline-block w-1 h-1 rounded-full bg-charcoal-muted/60 animate-pulse" />
-      )}
-      <span>{verb}</span>
-      {summary && (
-        <code className="text-[11px] font-mono text-charcoal-muted/80 truncate max-w-[280px]">
-          {truncate(summary, 60)}
-        </code>
-      )}
-    </div>
-  );
 }
 
 function newSessionId(): string {
@@ -165,11 +132,6 @@ export default function FeedbackButton() {
   }, [pathname]);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
-  const [streamingTools, setStreamingTools] = useState<ToolEvent[]>([]);
-  // True only between "turn started" and "first text/tool event arrived." Used
-  // to show dots during the initial wait without flashing them every time a
-  // transient tool line clears mid-turn.
-  const [awaitingFirstEvent, setAwaitingFirstEvent] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   // Draft state: Pimberton emits <<<draft:issue.md>>> sentinels; we load the
@@ -272,43 +234,16 @@ export default function FeedbackButton() {
     async (userMessage: string) => {
       setLoading(true);
       setStreamingText('');
-      setStreamingTools([]);
-      setAwaitingFirstEvent(true);
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      // Accumulate tools in a closure-local array so the completion handler
-      // attaches the final list to the assistant message without racing React
-      // state updates.
-      // Minimum time a tool line stays on screen, so fast calls (Read a small
-      // file, short Grep) don't just flash and disappear. Any tool that
-      // completes sooner is held back from removal until this deadline.
-      const MIN_TOOL_VISIBLE_MS = 600;
-      const toolShownAt = new Map<string, number>();
       try {
         const full = await streamFeedback(
           sessionId,
           userMessage,
           {
             onText: (t) => {
-              setAwaitingFirstEvent(false);
               setStreamingText(t);
-            },
-            onTool: (ev) => {
-              setAwaitingFirstEvent(false);
-              toolShownAt.set(ev.id, Date.now());
-              setStreamingTools((prev) => [...prev, ev]);
-            },
-            onToolDone: (id) => {
-              // Transient: remove once the minimum visible window has passed.
-              // Errors surface via onError, not the tool line.
-              const elapsed = Date.now() - (toolShownAt.get(id) ?? Date.now());
-              const remaining = Math.max(0, MIN_TOOL_VISIBLE_MS - elapsed);
-              toolShownAt.delete(id);
-              const remove = () =>
-                setStreamingTools((prev) => prev.filter((t) => t.id !== id));
-              if (remaining === 0) remove();
-              else setTimeout(remove, remaining);
             },
             onError: (msg) => {
               setMessages((prev) => [
@@ -338,8 +273,6 @@ export default function FeedbackButton() {
       } finally {
         setLoading(false);
         setStreamingText('');
-        setStreamingTools([]);
-        setAwaitingFirstEvent(false);
       }
     },
     [sessionId, loadDraft]
@@ -358,7 +291,7 @@ export default function FeedbackButton() {
   // Scroll to bottom on new messages / streaming
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, streamingText, streamingTools, open]);
+  }, [messages, streamingText, open]);
 
   useEffect(() => {
     if (open && !loading) inputRef.current?.focus();
@@ -429,7 +362,6 @@ export default function FeedbackButton() {
     greetedRef.current = false;
     setMessages([]);
     setStreamingText('');
-    setStreamingTools([]);
     setDraft(null);
     setFiledIssue(null);
     setFiledNotice(null);
@@ -604,22 +536,14 @@ export default function FeedbackButton() {
               )}
             </div>
           ))}
-          {(streamingText || streamingTools.length > 0) && (
-            <div className="animate-fade-up space-y-1.5">
-              {streamingText && <FeedbackMarkdown>{streamingText}</FeedbackMarkdown>}
-              {streamingTools.length > 0 && (
-                <div className="space-y-0.5 pl-0.5">
-                  {streamingTools.map((t) => (
-                    <ToolLine key={t.id} {...t} />
-                  ))}
-                </div>
-              )}
+          {streamingText && (
+            <div className="animate-fade-up">
+              <FeedbackMarkdown>{streamingText}</FeedbackMarkdown>
             </div>
           )}
-          {/* Dots only appear during the initial wait for a turn's first
-              event. After that, tool lines and streaming text carry the weight;
-              mid-turn gaps stay quiet so the UI doesn't feel frantic. */}
-          {loading && awaitingFirstEvent && <Dots />}
+          {/* Dots carry the full weight of "agent is working" — tool lines
+              used to flash too briefly to read, so we hide them entirely. */}
+          {loading && !streamingText && <Dots />}
           <div ref={bottomRef} />
         </div>
 
