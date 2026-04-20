@@ -139,6 +139,14 @@ export default function ExercisePage() {
   // race with the background POST in startPrefetch.
   const progressRef = useRef<Progress>({});
   const progressLoadedRef = useRef(false);
+  // Correctness for the current attempt. Set exactly once, in `submitAnswer`,
+  // from the tutor's first response after Submit. Every downstream consumer
+  // (progress POST, peel animation, in-memory tier math) reads from here, so
+  // a ✅ emitted later in follow-up chat cannot retroactively flip the verdict
+  // or create a split-brain where the peel disagrees with the saved progress.
+  // `null` means "no attempt decided yet for this problem" — the user either
+  // hasn't submitted, or is on a freshly loaded skill.
+  const currentAttemptRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     const handlePageHide = (e: PageTransitionEvent) => {
@@ -374,6 +382,8 @@ export default function ExercisePage() {
     setAnswer('');
     setChatInput('');
     setStreamingText('');
+    // Fresh problem → no attempt decided yet.
+    currentAttemptRef.current = null;
     const oldId = sessionIdRef.current;
     if (oldId) endSession(oldId);
     sessionIdRef.current = null;
@@ -506,7 +516,11 @@ export default function ExercisePage() {
         ...newMessages.map(({ role, content }) => ({ role, content })),
         { role: 'assistant', content: tutorText },
       ];
+      // Decide correctness from the tutor's first response after Submit and
+      // lock it in. This is the single source of truth for this attempt; the
+      // peel animation and progress POST both read `currentAttemptRef`.
       const correct = isCorrectMessage(tutorText);
+      currentAttemptRef.current = correct;
       startPrefetch(assessMessages, currentSkill, correct);
     }
   };
@@ -561,6 +575,8 @@ export default function ExercisePage() {
     setChatInput('');
     setStreamingText('');
     setInitializing(true);
+    // Fresh problem → no attempt decided yet.
+    currentAttemptRef.current = null;
 
     const apply = (s: PrefetchState) => {
       if (s.allDone) {
@@ -622,9 +638,13 @@ export default function ExercisePage() {
   const handleNext = async () => {
     if (!skill || !topic || loading) return;
 
-    // Derive correctness from last assistant message
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    const correct = lastAssistant ? isCorrectMessage(lastAssistant.content) : false;
+    // Correctness was decided in `submitAnswer` from the tutor's first
+    // response and stashed on `currentAttemptRef`. Read from there so the
+    // peel animation and tier math always agree with what was POSTed to
+    // `/api/progress`. A later ✅ in follow-up chat cannot change the verdict.
+    // If the user hit Next without submitting (no attempt decided), treat as
+    // an incorrect skip.
+    const correct = currentAttemptRef.current ?? false;
 
     let pf = prefetchRef.current;
 
