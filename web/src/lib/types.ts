@@ -1,7 +1,6 @@
 export interface SkillDefinition {
   name: string;
   examWeight: number;
-  timeCost: number;
 }
 
 export interface Topic {
@@ -9,9 +8,15 @@ export interface Topic {
   skills: SkillDefinition[];
 }
 
+export interface AlreadyKnownSkill {
+  name: string;
+  examWeight: number;
+}
+
 export interface Curriculum {
   test: string;
   topics: Topic[];
+  alreadyKnown?: AlreadyKnownSkill[];
 }
 
 export interface Attempt {
@@ -39,34 +44,22 @@ export interface MotivationLog {
 
 export type SkillStatus = 'not_started' | 'practicing' | 'mastered';
 
-export interface SkillExamSignals {
-  examWeight: number;
-  deficit: number;
-  timeCost: number;
-  flowBoost: number;
-  roi: number;
-  masteryTarget: number;
-}
-
 export interface NextSkillRecommendation {
   topic: string;
   skill: string;
   status: SkillStatus;
-  roi: number;
-  estimatedMinutes: number;
-  signal: SkillExamSignals;
 }
 
 export interface WeakSpot {
   topic: string;
   skill: string;
-  projectedGain: number;
+  pCorrect: number;
 }
 
 export interface ExamReadinessSummary {
   estimatedScoreLow: number;
   estimatedScoreHigh: number;
+  alreadyKnownPct: number;
   readiness: number;
   biggestGains: WeakSpot[];
-  nextThirtyMinutes: WeakSpot[];
 }

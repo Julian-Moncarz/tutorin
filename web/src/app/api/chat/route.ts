@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
 import { getContext, getCurriculum, getProgress, saveStudentPhoto } from '@/lib/files';
-import { getSkillStatus, shouldBeTemptation } from '@/lib/algorithm';
+import { getSkillStatus } from '@/lib/algorithm';
 import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
 
 const TURN1_TEMPLATE = readFileSync(
@@ -22,30 +22,12 @@ function buildSystemPrompt(): string {
 function renderTurn1(
   skill: string,
   attemptHistory: string,
-  status: string,
-  isTemptation: boolean
+  status: string
 ): string {
-  const temptationBlock = isTemptation
-    ? '\n** THIS SHOULD BE A TEMPTATION PROBLEM: Generate a problem that LOOKS like this skill but actually requires a different approach. Test whether the student can discriminate between similar-looking problems. **\n'
-    : '';
-
-  const adaptiveBlock = [
-    status === 'practicing'
-      ? `- The student is improving. Focus feedback on errors. Don't over-explain what they already know. Increase difficulty slightly.`
-      : '',
-    status === 'mastered'
-      ? `- The student has mastered this. This is REVIEW. Keep feedback brief — "Correct. Nice work recognizing [key insight]." Vary the problem.`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
   return TURN1_TEMPLATE
     .replace(/\{\{skill\}\}/g, skill)
     .replace('{{attemptHistory}}', attemptHistory)
-    .replace('{{status}}', status)
-    .replace('{{temptationBlock}}', temptationBlock)
-    .replace('{{adaptiveBlock}}', adaptiveBlock);
+    .replace('{{status}}', status);
 }
 
 export async function POST(req: NextRequest) {
@@ -144,12 +126,11 @@ export async function POST(req: NextRequest) {
       const curriculum = getCurriculum();
       const progress = getProgress();
       const status = getSkillStatus(skill, progress, curriculum);
-      const isTemptation = shouldBeTemptation(skill, progress);
       const attemptHistory =
         progress[skill]?.attempts
           .map((a, i) => `Attempt ${i + 1}: ${a.correct ? 'Correct' : 'Incorrect'} (${a.timestamp})`)
           .join('\n') || 'No previous attempts.';
-      userMessage = renderTurn1(skill, attemptHistory, status, isTemptation);
+      userMessage = renderTurn1(skill, attemptHistory, status);
     } else {
       userMessage = (message as string) + photoLine;
     }

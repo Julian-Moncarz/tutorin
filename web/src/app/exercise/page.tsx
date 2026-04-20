@@ -21,36 +21,28 @@ function isCorrectMessage(text: string): boolean {
   return text.includes('✅');
 }
 
-interface Tiers {
-  tier1: number; // fraction of skills with ≥1 correct
-  tier2: number; // ≥2 correct
-  tier3: number; // ≥3 correct (mastered)
-}
-
-function tieredFractionsForTopic(
+function retiredFractionForTopic(
   curriculum: Curriculum,
   progress: Progress,
   topicName: string
-): Tiers {
+): number {
   const topic = curriculum.topics.find((t) => t.topic === topicName);
-  if (!topic || topic.skills.length === 0) return { tier1: 0, tier2: 0, tier3: 0 };
+  if (!topic || topic.skills.length === 0) return 0;
   const N = topic.skills.length;
-  let t1 = 0, t2 = 0, t3 = 0;
+  let retired = 0;
   for (const rawSkill of topic.skills) {
     const s = getSkillName(rawSkill);
     const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
-    if (c >= 1) t1++;
-    if (c >= 2) t2++;
-    if (c >= 3) t3++;
+    if (c >= 1) retired++;
   }
-  return { tier1: t1 / N, tier2: t2 / N, tier3: t3 / N };
+  return retired / N;
 }
 
 interface PeelState {
   correct: boolean;
   topicName: string;
-  tiersBefore: Tiers;
-  tiersAfter: Tiers;
+  tierBefore: number;
+  tierAfter: number;
   pf: PrefetchState | null;
 }
 
@@ -656,36 +648,31 @@ export default function ExercisePage() {
       pf = prefetchRef.current;
     }
 
-    // Compute tiered fractions from the local progress snapshot and simulate
+    // Compute retired-fraction from the local progress snapshot and simulate
     // this attempt forward. Reading the server here would race with the
     // background POST in startPrefetch and often leave the bar static.
-    let tiersBefore: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
-    let tiersAfter: Tiers = { tier1: 0, tier2: 0, tier3: 0 };
+    let tierBefore = 0;
+    let tierAfter = 0;
     if (curriculum) {
       const progress = progressRef.current;
-      tiersBefore = tieredFractionsForTopic(curriculum, progress, topic);
+      tierBefore = retiredFractionForTopic(curriculum, progress, topic);
       const topicDef = curriculum.topics.find((t) => t.topic === topic);
       if (topicDef) {
         const existingCorrect = (progress[skill]?.attempts || []).filter((a) => a.correct).length;
         const step = 1 / topicDef.skills.length;
-        tiersAfter = { ...tiersBefore };
-        if (correct) {
-          const nowCorrect = existingCorrect + 1;
-          if (nowCorrect === 1) tiersAfter.tier1 = Math.min(1, tiersBefore.tier1 + step);
-          else if (nowCorrect === 2) tiersAfter.tier2 = Math.min(1, tiersBefore.tier2 + step);
-          else if (nowCorrect === 3) tiersAfter.tier3 = Math.min(1, tiersBefore.tier3 + step);
+        if (correct && existingCorrect === 0) {
+          tierAfter = Math.min(1, tierBefore + step);
+        } else if (!correct && existingCorrect === 0) {
+          // Wrong and not yet retired: small visual-only teaser nudge.
+          tierAfter = Math.min(1, tierBefore + step * 0.33);
         } else {
-          // Wrong: visual-only teaser nudge on the tier that would have moved.
-          const nudge = step * 0.33;
-          if (existingCorrect === 0) tiersAfter.tier1 = Math.min(1, tiersBefore.tier1 + nudge);
-          else if (existingCorrect === 1) tiersAfter.tier2 = Math.min(1, tiersBefore.tier2 + nudge);
-          else if (existingCorrect === 2) tiersAfter.tier3 = Math.min(1, tiersBefore.tier3 + nudge);
+          tierAfter = tierBefore;
         }
       } else {
-        tiersAfter = tiersBefore;
+        tierAfter = tierBefore;
       }
 
-      // Optimistically record the attempt so subsequent tier computations stay
+      // Optimistically record the attempt so subsequent computations stay
       // in sync with what startPrefetch will persist.
       if (!progress[skill]) progress[skill] = { attempts: [] };
       progress[skill].attempts.push({
@@ -694,7 +681,7 @@ export default function ExercisePage() {
       });
     }
 
-    setPeel({ correct, topicName: topic, tiersBefore, tiersAfter, pf });
+    setPeel({ correct, topicName: topic, tierBefore, tierAfter, pf });
     // Swap the page underneath to the next problem immediately, so when the peel
     // animates away the new problem is already rendered beneath.
     consumePrefetch(pf);
@@ -823,8 +810,8 @@ export default function ExercisePage() {
           <PeelReveal
             correct={peel.correct}
             topicName={peel.topicName}
-            tiersBefore={peel.tiersBefore}
-            tiersAfter={peel.tiersAfter}
+            tierBefore={peel.tierBefore}
+            tierAfter={peel.tierAfter}
             onRevealed={onPeelRevealed}
           />
         )}
@@ -981,8 +968,8 @@ export default function ExercisePage() {
         <PeelReveal
           correct={peel.correct}
           topicName={peel.topicName}
-          tiersBefore={peel.tiersBefore}
-          tiersAfter={peel.tiersAfter}
+          tierBefore={peel.tierBefore}
+          tierAfter={peel.tierAfter}
           onRevealed={onPeelRevealed}
         />
       )}

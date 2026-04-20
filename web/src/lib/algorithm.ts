@@ -4,14 +4,12 @@ import {
   NextSkillRecommendation,
   Progress,
   SkillDefinition,
-  SkillExamSignals,
   SkillStatus,
   WeakSpot,
 } from './types';
 
-// Cram mode (current default): one correct attempt retires a skill
-// for the rest of cramming. No more "nailed it, got asked again."
-const DEFAULT_MASTERY_THRESHOLD = 1;
+// One correct attempt retires a skill.
+const MASTERY_THRESHOLD = 1;
 
 // After any attempt on a skill, it sits out for this many subsequent
 // attempts (across all skills) before it's eligible to be served again.
@@ -40,110 +38,21 @@ function getSkillDefinition(
   return null;
 }
 
-function topicForSkill(curriculum: Curriculum, skillName: string): string {
-  return getSkillDefinition(curriculum, skillName)?.topic || 'General review';
-}
-
-function estimateMinutes(timeCost: number): number {
-  return Math.max(4, Math.round(10 * timeCost));
-}
-
-function coverageForSkill(skillName: string, progress: Progress, masteryTarget: number): number {
-  const attempts = progress[skillName]?.attempts || [];
-  if (attempts.length === 0) return 0.16;
-
-  const correctCount = attempts.filter((attempt) => attempt.correct).length;
-  const wrongCount = attempts.length - correctCount;
-  const base = clamp(correctCount / masteryTarget, 0, 1);
-
-  if (correctCount === 0) return wrongCount > 0 ? 0.28 : 0.16;
-  if (base >= 1) return 1;
-  return clamp(0.38 + base * 0.52, 0, 0.95);
-}
-
 export function getCorrectCount(skillName: string, progress: Progress): number {
   const attempts = progress[skillName]?.attempts || [];
   return attempts.filter((attempt) => attempt.correct).length;
 }
 
-export function getMasteryTarget(skillName: string, curriculum?: Curriculum): number {
-  // Cram mode: one correct attempt retires a skill, regardless of weight or cost.
-  // The adaptive 1–3 scaling lived here before; it's parked until we
-  // introduce a non-cram session mode.
-  void skillName;
-  void curriculum;
-  return DEFAULT_MASTERY_THRESHOLD;
-}
-
-export function getSkillSignals(
-  curriculum: Curriculum,
-  skillName: string,
-  progress: Progress
-): SkillExamSignals {
-  const definition = getSkillDefinition(curriculum, skillName)?.skill;
-  if (!definition) throw new Error(`Missing skill metadata for "${skillName}"`);
-  const attempts = progress[skillName]?.attempts || [];
-  const correctCount = getCorrectCount(skillName, progress);
-  const examWeight = definition.examWeight;
-  const timeCost = definition.timeCost;
-  const masteryTarget = getMasteryTarget(skillName, curriculum);
-
-  let deficit = 0.82;
-  if (attempts.length === 0) deficit = 1.15;
-  else if (correctCount === 0) deficit = 1;
-  else if (correctCount >= masteryTarget) deficit = 0.08;
-  else deficit = clamp(0.82 - (correctCount - 1) * 0.28, 0.2, 0.82);
-
-  // flowBoost used to nudge the algorithm toward re-serving a skill right
-  // after a correct attempt. In cram mode that's actively wrong: it was
-  // the mechanism behind "just got it right, got asked again." Parked at 1.
-  const flowBoost = 1;
-
-  const roi = (examWeight * deficit * flowBoost) / timeCost;
-
-  return {
-    examWeight,
-    deficit,
-    timeCost,
-    flowBoost,
-    roi,
-    masteryTarget,
-  };
-}
-
 export function getSkillStatus(
   skillName: string,
   progress: Progress,
-  curriculum?: Curriculum
+  _curriculum?: Curriculum
 ): SkillStatus {
+  void _curriculum;
   const attempts = progress[skillName]?.attempts || [];
   if (attempts.length === 0) return 'not_started';
-
-  const correctCount = getCorrectCount(skillName, progress);
-  const masteryTarget = getMasteryTarget(skillName, curriculum);
-  if (correctCount >= masteryTarget) return 'mastered';
-
+  if (getCorrectCount(skillName, progress) >= MASTERY_THRESHOLD) return 'mastered';
   return 'practicing';
-}
-
-function buildRecommendation(
-  curriculum: Curriculum,
-  progress: Progress,
-  skillName: string
-): NextSkillRecommendation {
-  const topic = topicForSkill(curriculum, skillName);
-  const status = getSkillStatus(skillName, progress, curriculum);
-  const signal = getSkillSignals(curriculum, skillName, progress);
-  const estimatedMinutes = estimateMinutes(signal.timeCost);
-
-  return {
-    topic,
-    skill: skillName,
-    status,
-    roi: signal.roi,
-    estimatedMinutes,
-    signal,
-  };
 }
 
 export function getAllSkillsOrdered(curriculum: Curriculum): { topic: string; skill: string }[] {
@@ -157,8 +66,8 @@ export function getAllSkillsOrdered(curriculum: Curriculum): { topic: string; sk
 }
 
 // Skills attempted in the last COOLDOWN_ATTEMPTS attempts (across all
-// skills) are on cooldown. This enforces "see it again only after a few
-// other problems," so the next encounter is a real retrieval test.
+// skills) are on cooldown. Enforces "see it again only after a few other
+// problems," so the next encounter is a real retrieval test.
 function getSkillsOnCooldown(progress: Progress): Set<string> {
   const allAttempts: { skill: string; timestamp: string }[] = [];
   for (const [skill, record] of Object.entries(progress)) {
@@ -180,44 +89,41 @@ export function getNextSkill(
 
   const cooldown = getSkillsOnCooldown(progress);
 
-  const nonMastered = allSkills.filter(
-    ({ skill }) => getSkillStatus(skill, progress, curriculum) !== 'mastered'
-  );
-
-  // Prefer skills that aren't on cooldown and rank by ROI.
-  const eligible = nonMastered.filter(({ skill }) => !cooldown.has(skill));
-
-  if (eligible.length > 0) {
-    const ranked = eligible
-      .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
-      .sort((a, b) => b.roi - a.roi);
-    return ranked[0];
+  // Phase 1: walk curriculum in order; serve the first skill the student
+  // hasn't gotten right yet and isn't on cooldown.
+  for (const { topic, skill } of allSkills) {
+    if (cooldown.has(skill)) continue;
+    if (getCorrectCount(skill, progress) === 0) {
+      return { topic, skill, status: getSkillStatus(skill, progress) };
+    }
   }
 
-  // Stranded pool: every non-mastered skill is on cooldown (e.g. the
-  // curriculum has fewer than COOLDOWN_ATTEMPTS non-mastered skills left).
-  // Don't strand the user. Serve the one attempted longest ago so it at
-  // least maximizes the retrieval gap we can offer.
-  if (nonMastered.length > 0) {
-    const byOldest = nonMastered
-      .map(({ skill }) => ({
+  // Phase 2: unretired skills that were ALL cooldowned — stranded pool.
+  // Serve the oldest-attempted one to maximize retrieval gap we can offer.
+  const unretired = allSkills.filter(({ skill }) => getCorrectCount(skill, progress) === 0);
+  if (unretired.length > 0) {
+    const byOldest = unretired
+      .map(({ topic, skill }) => ({
+        topic,
         skill,
-        lastTimestamp:
-          progress[skill]?.attempts.slice(-1)[0]?.timestamp || '',
+        lastTimestamp: progress[skill]?.attempts.slice(-1)[0]?.timestamp || '',
       }))
       .sort((a, b) => a.lastTimestamp.localeCompare(b.lastTimestamp));
-    return buildRecommendation(curriculum, progress, byOldest[0].skill);
+    const pick = byOldest[0];
+    return { topic: pick.topic, skill: pick.skill, status: getSkillStatus(pick.skill, progress) };
   }
 
-  const mastered = allSkills
-    .map(({ skill }) => buildRecommendation(curriculum, progress, skill))
-    .sort((a, b) => {
-      const aLast = progress[a.skill]?.attempts.slice(-1)[0]?.timestamp || '';
-      const bLast = progress[b.skill]?.attempts.slice(-1)[0]?.timestamp || '';
-      return aLast.localeCompare(bLast);
-    });
-
-  return mastered[0] ?? null;
+  // Phase 3: review mode. Every skill has ≥1 correct. Serve the one
+  // attempted longest ago.
+  const byOldest = allSkills
+    .map(({ topic, skill }) => ({
+      topic,
+      skill,
+      lastTimestamp: progress[skill]?.attempts.slice(-1)[0]?.timestamp || '',
+    }))
+    .sort((a, b) => a.lastTimestamp.localeCompare(b.lastTimestamp));
+  const pick = byOldest[0];
+  return { topic: pick.topic, skill: pick.skill, status: getSkillStatus(pick.skill, progress) };
 }
 
 export function getOverallProgress(
@@ -235,7 +141,7 @@ export function getOverallProgress(
   let notStarted = 0;
 
   for (const { skill } of allSkills) {
-    const status = getSkillStatus(skill, progress, curriculum);
+    const status = getSkillStatus(skill, progress);
     if (status === 'mastered') mastered += 1;
     else if (status === 'not_started') notStarted += 1;
     else practicing += 1;
@@ -244,92 +150,81 @@ export function getOverallProgress(
   return { total: allSkills.length, mastered, practicing, notStarted };
 }
 
-export function shouldBeTemptation(skillName: string, progress: Progress): boolean {
-  return getCorrectCount(skillName, progress) === 2;
-}
-
-function computeWeakSpot(
-  curriculum: Curriculum,
-  progress: Progress,
-  skillName: string
-): WeakSpot {
-  const topic = topicForSkill(curriculum, skillName);
-  const signal = getSkillSignals(curriculum, skillName, progress);
-  const coverage = coverageForSkill(skillName, progress, signal.masteryTarget);
-  const projectedGain = (1 - coverage) * signal.examWeight;
-
-  return {
-    topic,
-    skill: skillName,
-    projectedGain,
-  };
-}
-
-function evidenceLevel(skillName: string, progress: Progress): number {
+// P(correct on exam) per skill, given attempt history.
+// Priors chosen to feel honest: 0 attempts ≈ coin-flippy, 1 correct is
+// decent evidence but not overconfident, ≥2 correct is solid.
+function pCorrectForSkill(skillName: string, progress: Progress): number {
   const attempts = progress[skillName]?.attempts || [];
-  if (attempts.length === 0) return 0.15;
-  if (attempts.length === 1) return 0.45;
-  if (attempts.length === 2) return 0.7;
-  return 1;
+  if (attempts.length === 0) return 0.35;
+  const correctCount = attempts.filter((a) => a.correct).length;
+  if (correctCount === 0) return 0.15;
+  if (correctCount === 1) return 0.75;
+  return 0.9;
+}
+
+// Rough uncertainty per skill: how much the P estimate could be off.
+// 0 attempts: wide; 1 attempt: medium; 2+: narrow.
+function uncertaintyForSkill(skillName: string, progress: Progress): number {
+  const attempts = progress[skillName]?.attempts || [];
+  if (attempts.length === 0) return 0.25;
+  if (attempts.length === 1) return 0.12;
+  return 0.05;
 }
 
 export function getExamReadiness(
   curriculum: Curriculum,
   progress: Progress
 ): ExamReadinessSummary {
+  const alreadyKnown = curriculum.alreadyKnown || [];
+  const alreadyKnownPct = alreadyKnown.reduce((acc, s) => acc + (s.examWeight || 0), 0);
+
   const allSkills = getAllSkillsOrdered(curriculum);
   if (allSkills.length === 0) {
+    const pct = Math.round(alreadyKnownPct);
     return {
-      estimatedScoreLow: 0,
-      estimatedScoreHigh: 0,
-      readiness: 0,
+      estimatedScoreLow: pct,
+      estimatedScoreHigh: pct,
+      alreadyKnownPct: Math.round(alreadyKnownPct),
+      readiness: alreadyKnownPct / 100,
       biggestGains: [],
-      nextThirtyMinutes: [],
     };
   }
 
-  let weightedCoverage = 0;
-  let totalWeight = 0;
-  let evidenceGap = 0;
+  let weightedP = 0;
+  let weightedUncertainty = 0;
+  let totalCurriculumWeight = 0;
+  const weakSpots: WeakSpot[] = [];
 
-  const weakSpots = allSkills.map(({ skill }) => computeWeakSpot(curriculum, progress, skill));
-
-  for (const { skill } of allSkills) {
-    const signal = getSkillSignals(curriculum, skill, progress);
-    const coverage = coverageForSkill(skill, progress, signal.masteryTarget);
-    weightedCoverage += coverage * signal.examWeight;
-    totalWeight += signal.examWeight;
-    evidenceGap += (1 - evidenceLevel(skill, progress)) * signal.examWeight;
+  for (const { topic, skill } of allSkills) {
+    const def = getSkillDefinition(curriculum, skill)?.skill;
+    const w = def?.examWeight ?? 0;
+    const p = pCorrectForSkill(skill, progress);
+    const u = uncertaintyForSkill(skill, progress);
+    weightedP += p * w;
+    weightedUncertainty += u * w;
+    totalCurriculumWeight += w;
+    weakSpots.push({ topic, skill, pCorrect: p });
   }
 
-  const readiness = totalWeight > 0 ? weightedCoverage / totalWeight : 0;
-  const center = clamp(28 + readiness * 62, 25, 96);
-  const uncertainty = clamp((evidenceGap / totalWeight) * 16 + 4, 4, 18);
+  // Expected mark: already-known (locked) + expected fraction of curriculum weight.
+  const expectedCurriculumMark = weightedP; // already in "exam-weight units"
+  const center = alreadyKnownPct + expectedCurriculumMark;
+  const uncertainty = totalCurriculumWeight > 0 ? weightedUncertainty : 0;
 
   const estimatedScoreLow = Math.round(clamp(center - uncertainty, 0, 100));
   const estimatedScoreHigh = Math.round(clamp(center + uncertainty, 0, 100));
+  const totalWeight = alreadyKnownPct + totalCurriculumWeight;
+  const readiness = totalWeight > 0 ? center / totalWeight : 0;
 
   const biggestGains = [...weakSpots]
-    .sort((a, b) => b.projectedGain - a.projectedGain)
+    .sort((a, b) => a.pCorrect - b.pCorrect)
     .slice(0, 3);
-
-  const nextThirtyMinutes: WeakSpot[] = [];
-  let minutes = 0;
-  for (const spot of [...biggestGains, ...weakSpots.sort((a, b) => b.projectedGain - a.projectedGain)]) {
-    if (nextThirtyMinutes.some((item) => item.skill === spot.skill)) continue;
-    const signal = getSkillSignals(curriculum, spot.skill, progress);
-    const estimate = estimateMinutes(signal.timeCost);
-    if (minutes + estimate > 32 && nextThirtyMinutes.length > 0) continue;
-    nextThirtyMinutes.push(spot);
-    minutes += estimate;
-    if (minutes >= 24 || nextThirtyMinutes.length >= 3) break;
-  }
 
   return {
     estimatedScoreLow,
     estimatedScoreHigh,
+    alreadyKnownPct: Math.round(alreadyKnownPct),
     readiness,
     biggestGains,
-    nextThirtyMinutes,
   };
 }

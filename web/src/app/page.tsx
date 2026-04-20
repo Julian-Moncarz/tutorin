@@ -101,21 +101,21 @@ export default function Dashboard() {
       {readiness && (
         <div className="mt-14 border border-cream-border bg-cream-raised/40 p-5">
           <p className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted font-medium">
-            Exam readiness
+            Projected exam score
           </p>
           <p className="mt-2 text-[26px] leading-none font-semibold text-charcoal">
             {readiness.estimatedScoreLow}–{readiness.estimatedScoreHigh}%
           </p>
-          <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
-            Biggest score gains left:
-            {' '}
-            {readiness.biggestGains.map((gain) => gain.skill).join(' • ')}
+          <p className="mt-2 text-[12px] text-charcoal-muted">
+            Already know: {readiness.alreadyKnownPct}%
           </p>
-          <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
-            Best next block:
-            {' '}
-            {readiness.nextThirtyMinutes.map((gain) => gain.skill).join(' • ')}
-          </p>
+          {readiness.biggestGains.length > 0 && (
+            <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
+              Biggest score gains left:
+              {' '}
+              {readiness.biggestGains.map((gain) => gain.skill).join(' • ')}
+            </p>
+          )}
         </div>
       )}
 
@@ -127,17 +127,12 @@ export default function Dashboard() {
         <div className="space-y-6">
           {curriculum.topics.map((topic) => {
             const N = topic.skills.length || 1;
-            let t1c = 0, t2c = 0, t3c = 0;
+            let retiredCount = 0;
             for (const rawSkill of topic.skills) {
               const s = getSkillName(rawSkill);
-              const c = (progress[s]?.attempts || []).filter((a) => a.correct).length;
-              if (c >= 1) t1c++;
-              if (c >= 2) t2c++;
-              if (getSkillStatus(s, progress, curriculum) === 'mastered') t3c++;
+              if (getSkillStatus(s, progress, curriculum) === 'mastered') retiredCount++;
             }
-            const tier1 = t1c / N;
-            const tier2 = t2c / N;
-            const tier3 = t3c / N;
+            const retired = retiredCount / N;
             return (
               <div key={topic.topic}>
                 <div className="flex items-baseline justify-between mb-2">
@@ -145,37 +140,15 @@ export default function Dashboard() {
                     {topic.topic}
                   </h2>
                   <span className="text-[11px] text-charcoal-muted/60 tabular-nums">
-                    {t3c}/{topic.skills.length}
+                    {retiredCount}/{topic.skills.length}
                   </span>
                 </div>
-                <div
-                  className="relative w-full mb-3 rounded-full"
-                  style={{
-                    padding: `${tier3 * 4}px`,
-                    background:
-                      tier3 > 0
-                        ? 'linear-gradient(90deg, #f9a8d4, #fbcfe8, #f472b6, #fbcfe8, #f9a8d4)'
-                        : 'transparent',
-                    boxShadow:
-                      tier3 > 0
-                        ? `0 0 ${6 + tier3 * 14}px rgba(244,114,182,${0.15 + tier3 * 0.3})`
-                        : 'none',
-                    transition: 'all 700ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  }}
-                >
+                <div className="relative w-full mb-3 rounded-full">
                   <div className="relative h-3 bg-cream-overlay rounded-full overflow-hidden">
                     <div
                       className="absolute inset-y-0 left-0 rounded-full bg-green"
                       style={{
-                        width: `${tier1 * 100}%`,
-                        transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
-                      }}
-                    />
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{
-                        width: `${tier2 * 100}%`,
-                        background: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
+                        width: `${retired * 100}%`,
                         transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                     />
