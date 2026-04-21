@@ -240,10 +240,27 @@ combination, and then I move to Prototype.
 I narrate every step. This is the phase where the user most needs to feel
 taken care of, because things are happening on disk they can't see.
 
+**Do I need a preview?** Before spinning up a dev server, I ask myself: is
+there anything visual for the user to see in a browser? If the change is
+purely non-visual (prompt wording, backend logic, algorithm, data contract,
+scheduling, skill-mastery bookkeeping), I skip the dev server entirely. I
+still clone, branch, implement, run `npx tsc --noEmit`, and commit inside
+the sandbox, but I don't launch a server or hand the user a localhost URL.
+Instead I tell them what I built and move straight to Ship.
+
+Example skip copy: "This one's all backend, so there's nothing new to look
+at in the browser. I've got the change built and type-checked in a sandbox.
+Want me to walk you through what I did, or just ship it?"
+
+If the change is visual (UI, layout, styling, copy on screen, anything the
+user would notice by looking at the app), I spin up the full prototype as
+usual.
+
 Sandbox path: `/Users/julianmoncarz/tutorin-wt/feedback-<issueNumber>`
 Branch: `fix/issue-<issueNumber>`
 
-Exact recipe:
+Exact recipe (visual changes only; for non-visual changes I stop after the
+commit and skip steps 4 through 7):
 
 ```bash
 # 1. Clone repo locally (no network)
@@ -336,9 +353,16 @@ No rollback worries, the whole sandbox gets thrown away.
 
 When the user signals ship it, looks good, we're done, I:
 
-**Take before/after screenshots.** Inside the sandbox. `playwright` is already
-in the repo's devDependencies, so I don't pass `--with-deps` (that flag is
-Debian-only and will error on macOS):
+**Take before/after screenshots (visual changes only).** I only take
+screenshots if the change is visual, meaning there's something the user
+would notice by looking at the app (UI, layout, styling, copy on screen).
+If the change is non-visual (prompt wording, backend logic, algorithm, data
+contract), I skip screenshots entirely and describe the before/after in
+words inside the PR body instead.
+
+When I do take screenshots, `playwright` is already in the repo's
+devDependencies, so I don't pass `--with-deps` (that flag is Debian-only
+and will error on macOS):
 
 ```bash
 cd "$SANDBOX/web"
@@ -376,16 +400,14 @@ shipping over a missing image.
 
 "Want me to ship this as a PR to GitHub?"
 
-On yes:
+On yes, I build the PR body based on whether the change was visual or not:
+
+**Visual change PR** (with screenshots):
 
 ```bash
 cd "$SANDBOX"
 git push -u origin fix/issue-<n>
 
-# Use repo-relative paths. GitHub renders these against the pushed branch, so
-# they work on private repos and don't wait on the raw CDN. (Never use
-# raw.githubusercontent.com links here — they 404 on private repos and have
-# CDN propagation lag even on public ones.)
 BODY=$(cat <<EOF
 Closes #<n>
 
@@ -394,6 +416,32 @@ Closes #<n>
 | Before | After |
 |---|---|
 | ![before](.feedback/issue-<n>/before.png) | ![after](.feedback/issue-<n>/after.png) |
+
+## What changed and why
+
+<one paragraph in user-facing language: what was wrong, what direction I took,
+how the change addresses it>
+EOF
+)
+
+gh pr create --repo {{repo}} --base main \
+  --title "<short imperative title>" --body "$BODY"
+```
+
+**Non-visual change PR** (no screenshots, written before/after instead):
+
+```bash
+cd "$SANDBOX"
+git push -u origin fix/issue-<n>
+
+BODY=$(cat <<EOF
+Closes #<n>
+
+## Before / After
+
+**Before:** <1-2 sentences describing the old behavior>
+
+**After:** <1-2 sentences describing the new behavior>
 
 ## What changed and why
 
