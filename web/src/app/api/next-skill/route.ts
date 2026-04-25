@@ -9,7 +9,7 @@ export async function GET() {
     const next = getNextSkill(curriculum, progress);
 
     if (!next) {
-      return NextResponse.json({ done: true, message: 'All skills mastered!' });
+      return NextResponse.json({ done: true, message: 'All skills retired!' });
     }
 
     return NextResponse.json(next);

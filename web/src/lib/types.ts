@@ -42,16 +42,11 @@ export interface MotivationLog {
   feeling: 'focused' | 'tired' | 'frustrated' | 'bored';
 }
 
-export type SkillStatus = 'not_started' | 'practicing' | 'mastered';
-
 export interface NextSkillRecommendation {
-  topic: string;
   skill: string;
-  status: SkillStatus;
 }
 
 export interface WeakSpot {
-  topic: string;
   skill: string;
   pCorrect: number;
 }

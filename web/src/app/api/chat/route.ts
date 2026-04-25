@@ -1,8 +1,7 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
-import { getContext, getCurriculum, getProgress, saveStudentPhoto } from '@/lib/files';
-import { getSkillStatus } from '@/lib/algorithm';
+import { getContext, saveStudentPhoto } from '@/lib/files';
 import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
 
 const TURN1_TEMPLATE = readFileSync(
@@ -19,15 +18,8 @@ function buildSystemPrompt(): string {
   return SYSTEM_PROMPT_TEMPLATE.replace('{{context}}', getContext());
 }
 
-function renderTurn1(
-  skill: string,
-  attemptHistory: string,
-  status: string
-): string {
-  return TURN1_TEMPLATE
-    .replace(/\{\{skill\}\}/g, skill)
-    .replace('{{attemptHistory}}', attemptHistory)
-    .replace('{{status}}', status);
+function renderTurn1(skill: string): string {
+  return TURN1_TEMPLATE.replace(/\{\{skill\}\}/g, skill);
 }
 
 export async function POST(req: NextRequest) {
@@ -123,14 +115,7 @@ export async function POST(req: NextRequest) {
 
     let userMessage: string;
     if (isNew) {
-      const curriculum = getCurriculum();
-      const progress = getProgress();
-      const status = getSkillStatus(skill, progress, curriculum);
-      const attemptHistory =
-        progress[skill]?.attempts
-          .map((a, i) => `Attempt ${i + 1}: ${a.correct ? 'Correct' : 'Incorrect'} (${a.timestamp})`)
-          .join('\n') || 'No previous attempts.';
-      userMessage = renderTurn1(skill, attemptHistory, status);
+      userMessage = renderTurn1(skill);
     } else {
       userMessage = (message as string) + photoLine;
     }

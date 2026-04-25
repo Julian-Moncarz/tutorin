@@ -42,7 +42,7 @@ export function endSessionOnUnload(sessionId: string): void {
   }
 }
 
-// `message === null` signals "new session, generate first problem".
+// `message === null` signals "new session, open the study session".
 // Any non-null string is forwarded as the student's latest user message.
 export async function streamChat(
   skill: string,
