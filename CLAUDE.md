@@ -8,7 +8,7 @@ Tutorin is a test-prep learning system built on the "file over app" philosophy. 
 
 ## Two-part architecture
 
-1. **Intake skill** (`skill/SKILL.md`) — A Claude Code skill run by the user in their study folder. It interviews them, reads their materials, then writes `curriculum.json`, `context.md`, and `progress.json` into that folder.
+1. **Intake prompt** (`intake_prompt.md`) — A prompt run as a Claude Code session in the user's study folder. It interviews them, reads their materials, then writes `curriculum.json`, `context.md`, and `progress.json` into that folder.
 2. **Web UI** (`web/`) — A Next.js 14 app (app router) that reads those files, runs the skill-selection algorithm, and shells out to the `claude` CLI per chat session to stream tutoring + feedback responses.
 
 A live example of a student's study folder lives at `test-study/` (curriculum + progress + logs + feedback drafts). This is real data, not a fixture — be careful editing it.
@@ -41,10 +41,9 @@ There is no test suite, no linter configured, and no formatter script. Type-chec
 
 ### Tutor chat (per-exercise Claude session)
 - `web/src/lib/claudeSessions.ts` — long-lived `claude -p --input-format stream-json --output-format stream-json --verbose --effort medium --system-prompt <…> --dangerously-skip-permissions` subprocesses, one per `sessionId`, kept in a `globalThis`-pinned `Map` (so Next dev module re-eval doesn't orphan them). Each turn writes one NDJSON `{"type":"user","message":{"role":"user","content":"..."}}` line to stdin and reads `assistant` / `user`(tool_result) / `result` events from stdout, emitting normalized `text` / `tool` / `tool_done` / `done` / `busy` / `error` events to the caller. **No idle sweeper** — sessions live until explicit `deleteSession`, server exit, or subprocess crash. Default turn timeout 120s (overridable). Concurrent `send()` returns `busy` immediately; **caller-abort does NOT kill the session** — the turn runs to completion so `busy` clears naturally.
-- `web/src/app/api/chat/route.ts` — wrapper over `claudeSessions`. Body: `{skill, sessionId, message: string | null, image?}`. `message === null` + `isNew` → render `tutor-turn1-template.md` and send as turn 1. `message !== null` + `!isNew` → forward as student reply (with optional photo line; photos saved via `saveStudentPhoto` and referenced by absolute path so the tutor reads them via the `Read` tool). `message !== null` + `isNew` → 409 `session_expired` (server doesn't have this id; client must restart). Emits `text` blocks as SSE `data:` frames; `busy` surfaces as `{"error":"session busy"}`.
+- `web/src/app/api/chat/route.ts` — wrapper over `claudeSessions`. Body: `{skill, sessionId, message: string | null, image?}`. `message === null` + `isNew` → send a minimal first user message (just the skill name + "Begin.") as turn 1; the system prompt does all the heavy lifting. `message !== null` + `!isNew` → forward as student reply (with optional photo line; photos saved via `saveStudentPhoto` and referenced by absolute path so the tutor reads them via the `Read` tool). `message !== null` + `isNew` → 409 `session_expired` (server doesn't have this id; client must restart). Emits `text` blocks as SSE `data:` frames; `busy` surfaces as `{"error":"session busy"}`. **Single source of truth for tutor behavior:** the system prompt is read from repo-root `tutor_prompt.md`. The first-turn template is intentionally a one-liner inlined in `route.ts` so future edits to the system prompt don't get fought by overlapping instructions.
 - `web/src/app/api/chat/session/route.ts` — `DELETE /api/chat/session?id=X` tears down a session. Also accepts `POST` so the browser can use `navigator.sendBeacon` in `pagehide` handlers (sendBeacon is POST-only).
-- `web/src/app/api/chat/tutor-system-prompt.md` — stable tutor persona, feedback rules, pacing, self-contained-ask rule, paper/photo workflow, plus the full `context.md` (substituted via `{{context}}`). The task spec is "run a study session until the student can do this skill unaided, then emit ✅"; ✅ is the session-end signal. The tutor decides when to emit it. Read once at module load, `{{context}}` replaced at session creation, passed via `--system-prompt`.
-- `web/src/app/api/chat/tutor-turn1-template.md` — first-user-message template with just `{{skill}}`. Tells the tutor to open the study session.
+- `tutor_prompt.md` (repo root) — stable tutor persona, feedback rules, pacing, self-contained-ask rule, paper/photo workflow, plus the full `context.md` (substituted via `{{context}}`). The task spec is "run a study session until the student can do this skill unaided, then emit ✅"; ✅ is the session-end signal. The tutor decides when to emit it. Read once at module load, `{{context}}` replaced at session creation, passed via `--system-prompt`.
 - `web/src/lib/chatStream.ts` — client-side SSE consumer. `streamChat(skill, message, sessionId, onText, signal?, image?)`. Also exposes `endSession` (explicit DELETE), `endSessionOnUnload` (sendBeacon fallback for tab close), `startFirstQuestionPrefetch` / `takeFirstQuestionPrefetch` / `abandonFirstQuestionPrefetch` (prefetches the opener for the next skill so exercise view feels instant; `pagehide` listener tears down any unconsumed prefetch).
 
 ### Feedback agent (Pimberton)
@@ -72,7 +71,7 @@ The file shapes are the public API of this system. Changing them breaks the inta
 - `logs/`: per-session conversation JSON, `motivation.json`, `photos/`.
 - `feedback/drafts/<sessionId>/`: Pimberton's working directory per feedback session.
 
-If you modify any of these, update `skill/SKILL.md` and `web/src/lib/types.ts` together.
+If you modify any of these, update `intake_prompt.md` and `web/src/lib/types.ts` together.
 
 ## Design principles to respect
 

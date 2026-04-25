@@ -10,12 +10,7 @@ build
 out
 .vercel
 
-# Per-student session artifacts — regenerated whenever the app is used
-# against test-study/. Existing tracked example logs stay tracked; this
-# only prevents new log files and photo uploads from cluttering git status.
-test-study/logs/*.json
-test-study/logs/photos/
+# Per-student artifacts — kept on disk locally, never committed.
+test-study/
 .study/
-test-study/feedback/
-dev.log
 dev.log

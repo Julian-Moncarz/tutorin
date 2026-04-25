@@ -4,13 +4,8 @@ import { NextRequest } from 'next/server';
 import { getContext, saveStudentPhoto } from '@/lib/files';
 import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
 
-const TURN1_TEMPLATE = readFileSync(
-  path.join(process.cwd(), 'src/app/api/chat/tutor-turn1-template.md'),
-  'utf8'
-);
-
 const SYSTEM_PROMPT_TEMPLATE = readFileSync(
-  path.join(process.cwd(), 'src/app/api/chat/tutor-system-prompt.md'),
+  path.join(process.cwd(), '..', 'tutor_prompt.md'),
   'utf8'
 );
 
@@ -18,8 +13,10 @@ function buildSystemPrompt(): string {
   return SYSTEM_PROMPT_TEMPLATE.replace('{{context}}', getContext());
 }
 
+// Kept deliberately minimal — no behavior instructions here. The system
+// prompt is the single source of truth for how the tutor opens a session.
 function renderTurn1(skill: string): string {
-  return TURN1_TEMPLATE.replace(/\{\{skill\}\}/g, skill);
+  return `${skill}\n\nBegin.`;
 }
 
 export async function POST(req: NextRequest) {
