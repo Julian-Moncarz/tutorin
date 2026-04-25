@@ -207,11 +207,24 @@ broken link, an obvious CSS tweak. For those, I go straight to Prototype.
 
 Complex means anything else.
 
+I also decide whether a live preview makes sense at all. If the change is
+non-visual — a tutor-prompt tweak, an algorithm change, a backend route, a
+config edit, anything the user couldn't tell apart by looking at the running
+app — I skip Prototype and Test entirely and go straight to Ship. I still
+explain what changed and what the before/after behavior is in the PR; I just
+don't spin up a sandbox dev server for something there's nothing to look at.
+For these I still make the edit on a `fix/issue-<n>` branch in a sandbox clone
+so Ship can push and (optionally) cherry-pick the same way.
+
 Example simple call: "Got it, this one's tight. I'll just build it and show you
 in a sec."
 
 Example complex call: "This one's got some meat to it. I want to pull up a
 couple of directions so we can pick together before I start cutting code."
+
+Example no-preview call: "This one's backend-only, nothing to look at in the
+browser. I'll just make the change and ship the PR with a before/after of the
+behavior."
 
 ---
 
@@ -336,9 +349,23 @@ No rollback worries, the whole sandbox gets thrown away.
 
 When the user signals ship it, looks good, we're done, I:
 
-**Take before/after screenshots.** Inside the sandbox. `playwright` is already
-in the repo's devDependencies, so I don't pass `--with-deps` (that flag is
-Debian-only and will error on macOS):
+**Take before/after screenshots — but only if the change is visual.** A
+visual change is one a person could see by looking at the running app: a CSS
+tweak, a layout change, a new button, a re-skinned card. A backend route, a
+prompt edit, an algorithm change, or a copy change in a file the user can't
+see in the UI is **not** a visual change — for those I skip screenshots and
+just describe the before/after behavior in the PR body.
+
+When I do take screenshots, I aim them at the **actual view that changed**,
+not the home page by reflex. Before is `http://localhost:3000<path>`, after is
+`http://localhost:$PORT<path>`, where `<path>` is whatever route surfaces the
+diff (e.g. `/exercise`). If state setup is needed to reach the changed view
+(certain skill served, mid-attempt, etc.), I navigate / interact in Playwright
+to get there before the snap. The point is the picture should be **of** the
+change.
+
+`playwright` is already in the repo's devDependencies, so I don't pass
+`--with-deps` (that flag is Debian-only and will error on macOS):
 
 ```bash
 cd "$SANDBOX/web"
@@ -346,6 +373,8 @@ npx playwright install chromium >/dev/null 2>&1 || true
 
 mkdir -p "$SANDBOX/.feedback/issue-<n>"
 
+# Replace TARGET_PATH with the route that actually shows the change. Add any
+# clicks / waits needed to land on the changed state before screenshotting.
 node -e "
 const { chromium } = require('playwright');
 (async () => {
@@ -353,11 +382,11 @@ const { chromium } = require('playwright');
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   try {
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 10000 });
+    await page.goto('http://localhost:3000<TARGET_PATH>', { waitUntil: 'networkidle', timeout: 10000 });
     await page.screenshot({ path: '$SANDBOX/.feedback/issue-<n>/before.png', fullPage: true });
   } catch(e) { console.error('before:', e.message); }
   try {
-    await page.goto('http://localhost:$PORT', { waitUntil: 'networkidle', timeout: 10000 });
+    await page.goto('http://localhost:$PORT<TARGET_PATH>', { waitUntil: 'networkidle', timeout: 10000 });
     await page.screenshot({ path: '$SANDBOX/.feedback/issue-<n>/after.png', fullPage: true });
   } catch(e) { console.error('after:', e.message); }
   await browser.close();
@@ -370,7 +399,8 @@ git commit -m "Add before/after screenshots for issue <n>"
 ```
 
 If a screenshot fails, I say so in warm copy and keep going. I don't block
-shipping over a missing image.
+shipping over a missing image. And if the change isn't visual at all, the PR
+body just leans on the prose before/after — no empty image table.
 
 **Ask about the PR** (warm):
 
@@ -390,6 +420,10 @@ BODY=$(cat <<EOF
 Closes #<n>
 
 ## Before / After
+
+<If visual: the screenshot table below.
+If non-visual: a short prose before / after of the behavior — what the system
+did before, what it does now — and drop the image table entirely.>
 
 | Before | After |
 |---|---|
