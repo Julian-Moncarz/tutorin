@@ -14,7 +14,7 @@ Ask the student:
 
 **Do NOT** ask them what they feel solid on. That's what the diagnostic is for — self-report is unreliable.
 
-Read all files in the current folder. Analyze past exams, lecture slides, syllabi, notes.
+Read ALL files in the current folder. Analyze past exams, lecture slides, syllabi, notes. READ THEM ALL NOT JUST A SUBSET.
 
 ### Step 2: Draft a candidate skill list (internal)
 
