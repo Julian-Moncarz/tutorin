@@ -27,6 +27,7 @@ Rules for the draft:
 - Order topics from prerequisite to dependent.
 - Include both procedural and conceptual skills.
 - Include prerequisites if the student has visible gaps below test level.
+- **No mechanical busywork.** Exclude skills that are pure symbol-pushing or rote transcription (e.g., "expand a sigma into its first few terms") — if the conceptual work is trivial and the cost is just typing it out, it doesn't belong in the curriculum. Exception: include it if the past exams / professor explicitly test that exact mechanical step.
 
 ### Step 3: Run a diagnostic quiz
 
