@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { playPeel, playBarRise, playSkillRetired } from '@/lib/audio';
+import { playPeel, playSkillRetired } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -48,17 +48,14 @@ const LINES = [
 ];
 
 interface Props {
-  correct: boolean;
-  topicName: string;
-  tierBefore: number; // fraction of topic's skills retired, pre-attempt (0..1)
-  tierAfter: number;  // fraction retired, post-attempt (0..1)
+  scoreBefore: number; // exam-score percentage, pre-retire (0..100)
+  scoreAfter: number;  // exam-score percentage, post-retire (0..100)
   onRevealed: () => void;
 }
 
-export default function PeelReveal({ correct, topicName, tierBefore, tierAfter, onRevealed }: Props) {
+export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Props) {
   const [line] = useState(() => LINES[Math.floor(Math.random() * LINES.length)]);
-
-  const [tier, setTier] = useState<number>(tierBefore);
+  const [displayScore, setDisplayScore] = useState<number>(scoreBefore);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [committed, setCommitted] = useState(false);
@@ -67,39 +64,37 @@ export default function PeelReveal({ correct, topicName, tierBefore, tierAfter, 
   const pointerId = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Did this attempt retire a fresh skill in this topic?
-  const retired: boolean = correct && tierBefore < tierAfter;
-
   useEffect(() => {
-    // 180ms: bar starts filling + bar-rise sweep plays (~0.9s on correct).
-    const t1 = setTimeout(() => {
-      setTier(tierAfter);
-      playBarRise(correct);
-    }, 180);
+    // Fanfare fires immediately. Same one every time.
+    playSkillRetired();
 
-    // ~1250ms: bar fill + bar-rise finished. NOW celebrate.
-    let t2: ReturnType<typeof setTimeout> | null = null;
-    if (retired) {
-      t2 = setTimeout(() => {
-        setCelebrate(true);
-        playSkillRetired();
-      }, 1250);
-    }
-
-    return () => {
-      clearTimeout(t1);
-      if (t2) clearTimeout(t2);
+    // Tween the score number from before → after over ~1.4s.
+    const start = performance.now();
+    const duration = 1400;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplayScore(scoreBefore + (scoreAfter - scoreBefore) * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
     };
-  }, [tierAfter, correct, retired]);
+    raf = requestAnimationFrame(tick);
+
+    const t1 = setTimeout(() => setCelebrate(true), 200);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t1);
+    };
+  }, [scoreBefore, scoreAfter]);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
       if (prev) return prev;
-      playPeel(correct);
+      playPeel();
       setTimeout(onRevealed, 520);
       return true;
     });
-  }, [correct, onRevealed]);
+  }, [onRevealed]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -131,11 +126,8 @@ export default function PeelReveal({ correct, topicName, tierBefore, tierAfter, 
     if (!dragging) return;
     setDragging(false);
     pointerId.current = null;
-    if (dragX < -90) {
-      commit();
-    } else {
-      setDragX(0);
-    }
+    if (dragX < -90) commit();
+    else setDragX(0);
   };
 
   const rotate = dragX * 0.02;
@@ -151,6 +143,7 @@ export default function PeelReveal({ correct, topicName, tierBefore, tierAfter, 
 
   const dragProgress = Math.min(1, -dragX / 90);
   const cornerLift = 18 + dragProgress * 40;
+  const delta = scoreAfter - scoreBefore;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -174,25 +167,21 @@ export default function PeelReveal({ correct, topicName, tierBefore, tierAfter, 
         <div className="h-full w-full flex flex-col items-center justify-center px-6">
           <div className="w-full max-w-md flex flex-col items-center">
             <p className="text-[10px] uppercase tracking-[0.18em] text-charcoal-muted mb-4">
-              {topicName}
+              Projected exam score
             </p>
 
-            <div className="relative w-full mb-10 rounded-full">
-              <div
-                className={`relative h-5 bg-cream-dark/50 rounded-full overflow-hidden ${
-                  celebrate ? 'celebrate-pop' : ''
-                }`}
-              >
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-green"
-                  style={{
-                    width: `${tier * 100}%`,
-                    transition: 'width 1000ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  }}
-                />
-                {celebrate && <div className="celebrate-sheen t1" />}
-              </div>
+            <div className={`mb-2 ${celebrate ? 'celebrate-pop' : ''}`}>
+              <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none">
+                {Math.round(displayScore)}
+              </span>
+              <span className="text-[36px] font-semibold text-charcoal-muted">%</span>
             </div>
+
+            {delta > 0 && (
+              <p className="text-[15px] text-green font-semibold tabular-nums mb-10">
+                +{(Math.round(delta * 10) / 10).toFixed(1)} points
+              </p>
+            )}
 
             <p className="text-center text-[17px] text-charcoal leading-relaxed max-w-sm">
               {line}

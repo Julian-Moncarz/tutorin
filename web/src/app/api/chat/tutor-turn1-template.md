@@ -1,8 +1,4 @@
 ## Current Skill
 {{skill}}
 
-## Student's History With This Skill
-{{attemptHistory}}
-Current status: {{status}}
-
-Start the session — generate the problem now per your system prompt's task spec.
+Open the study session per your system prompt's task spec. Brief motivation, frame what they're learning, then start teaching the first chunk.

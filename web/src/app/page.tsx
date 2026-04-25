@@ -2,20 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSkillName, getSkillStatus } from '@/lib/algorithm';
-import { Curriculum, ExamReadinessSummary, NextSkillRecommendation, Progress, SkillStatus } from '@/lib/types';
+import { getSkillName, isRetired } from '@/lib/algorithm';
+import { Curriculum, ExamReadinessSummary, NextSkillRecommendation, Progress } from '@/lib/types';
 import { startFirstQuestionPrefetch } from '@/lib/chatStream';
 
-function StatusDot({ status }: { status: SkillStatus }) {
-  if (status === 'mastered') {
+function StatusDot({ retired }: { retired: boolean }) {
+  if (retired) {
     return (
       <svg width="12" height="12" viewBox="0 0 12 12" className="text-green/70 flex-shrink-0">
         <path d="M2 6.5L4.8 9L10 3.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
-  }
-  if (status === 'practicing') {
-    return <span className="inline-block w-1.5 h-1.5 rounded-full bg-green flex-shrink-0" />;
   }
   return <span className="inline-block w-1.5 h-1.5 rounded-full bg-cream-dark flex-shrink-0" />;
 }
@@ -67,8 +64,6 @@ export default function Dashboard() {
       </div>
     );
   }
-
-  const allSkills = curriculum.topics.flatMap((t) => t.skills.map(getSkillName));
 
   return (
     <div className="min-h-screen max-w-xl mx-auto px-6 pt-24 pb-16">
@@ -130,9 +125,9 @@ export default function Dashboard() {
             let retiredCount = 0;
             for (const rawSkill of topic.skills) {
               const s = getSkillName(rawSkill);
-              if (getSkillStatus(s, progress, curriculum) === 'mastered') retiredCount++;
+              if (isRetired(s, progress)) retiredCount++;
             }
-            const retired = retiredCount / N;
+            const retiredFrac = retiredCount / N;
             return (
               <div key={topic.topic}>
                 <div className="flex items-baseline justify-between mb-2">
@@ -148,7 +143,7 @@ export default function Dashboard() {
                     <div
                       className="absolute inset-y-0 left-0 rounded-full bg-green"
                       style={{
-                        width: `${retired * 100}%`,
+                        width: `${retiredFrac * 100}%`,
                         transition: 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                     />
@@ -157,16 +152,16 @@ export default function Dashboard() {
                 <ul className="space-y-1.5">
                   {topic.skills.map((rawSkill) => {
                     const skill = getSkillName(rawSkill);
-                    const status = getSkillStatus(skill, progress, curriculum);
+                    const retired = isRetired(skill, progress);
                     return (
                       <li
                         key={skill}
                         className="flex items-center gap-2.5 text-[13px] leading-snug"
                       >
-                        <StatusDot status={status} />
+                        <StatusDot retired={retired} />
                         <span
                           className={
-                            status === 'mastered'
+                            retired
                               ? 'text-charcoal-muted line-through decoration-cream-dark'
                               : 'text-charcoal-secondary/80'
                           }

@@ -11,7 +11,6 @@ function getCtx(): AudioContext | null {
   return ctx;
 }
 
-// Helper: schedule one note (additive sine + optional triangle partial) with ADSR.
 function scheduleNote(
   ac: AudioContext,
   freq: number,
@@ -65,113 +64,12 @@ function noiseBuffer(ac: AudioContext, duration: number): AudioBuffer {
   return buffer;
 }
 
-// Warm major-triad arpeggio when ✅ appears in the tutor's reply.
-// Sine waves through a gentle lowpass, ~900ms total. Nice, not piercing.
-export function playCorrectChime(): void {
+// Crinkle / rip / snap when the user swipes the peel card off. ~500ms.
+export function playPeel(): void {
   const ac = getCtx();
   if (!ac) return;
   const now = ac.currentTime;
 
-  // C major triad ascending: C5, E5, G5, C6
-  const notes: [number, number][] = [
-    [523.25, 0.0],
-    [659.25, 0.1],
-    [783.99, 0.2],
-    [1046.5, 0.32],
-  ];
-
-  // Shared soft lowpass keeps the tone mellow
-  const lp = ac.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 3200;
-  lp.Q.value = 0.6;
-  lp.connect(ac.destination);
-
-  notes.forEach(([freq, delay], i) => {
-    const o = ac.createOscillator();
-    o.type = 'sine';
-    o.frequency.value = freq;
-
-    // A quieter triangle partial an octave up for a touch of shimmer
-    const p = ac.createOscillator();
-    p.type = 'triangle';
-    p.frequency.value = freq * 2;
-
-    const g = ac.createGain();
-    const t0 = now + delay;
-    const peak = 0.11 - i * 0.012; // slightly softer as we ascend
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(peak, t0 + 0.025);
-    g.gain.linearRampToValueAtTime(peak * 0.55, t0 + 0.18);
-    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
-
-    const pg = ac.createGain();
-    pg.gain.setValueAtTime(0, t0);
-    pg.gain.linearRampToValueAtTime(peak * 0.18, t0 + 0.03);
-    pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
-
-    o.connect(g).connect(lp);
-    p.connect(pg).connect(lp);
-    o.start(t0);
-    p.start(t0);
-    o.stop(t0 + 0.65);
-    p.stop(t0 + 0.45);
-  });
-}
-
-// Rising pitch sweep synced to the bar fill animation (~900ms).
-// Bigger jump on correct → starts higher, louder. Small nudge on wrong → softer.
-export function playBarRise(correct: boolean): void {
-  const ac = getCtx();
-  if (!ac) return;
-  const now = ac.currentTime;
-  const duration = correct ? 0.9 : 0.75;
-  const peakGain = correct ? 0.09 : 0.085;
-  const startFreq = correct ? 440 : 520;
-  const endFreq = correct ? 880 : 660;
-
-  const o = ac.createOscillator();
-  o.type = 'sine';
-  o.frequency.setValueAtTime(startFreq, now);
-  o.frequency.exponentialRampToValueAtTime(endFreq, now + duration);
-
-  const g = ac.createGain();
-  g.gain.setValueAtTime(0, now);
-  g.gain.linearRampToValueAtTime(peakGain, now + 0.1);
-  g.gain.linearRampToValueAtTime(peakGain * 0.7, now + duration * 0.75);
-  g.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-  // Slight lowpass to keep it soft, not piercing
-  const lp = ac.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 2200;
-
-  o.connect(lp).connect(g).connect(ac.destination);
-  o.start(now);
-  o.stop(now + duration + 0.02);
-
-  if (correct) {
-    // Add a perfect fifth harmonic, quieter, for body
-    const h = ac.createOscillator();
-    h.type = 'sine';
-    h.frequency.setValueAtTime(startFreq * 1.5, now);
-    h.frequency.exponentialRampToValueAtTime(endFreq * 1.5, now + duration);
-    const hg = ac.createGain();
-    hg.gain.setValueAtTime(0, now);
-    hg.gain.linearRampToValueAtTime(peakGain * 0.5, now + 0.12);
-    hg.gain.exponentialRampToValueAtTime(0.001, now + duration);
-    h.connect(hg).connect(ac.destination);
-    h.start(now);
-    h.stop(now + duration + 0.02);
-  }
-}
-
-export function playPeel(correct: boolean): void {
-  const ac = getCtx();
-  if (!ac) return;
-  const now = ac.currentTime;
-
-  // 1. Crinkle: filtered noise during the pull (0 – 320ms)
   const crinkle = ac.createBufferSource();
   crinkle.buffer = noiseBuffer(ac, 0.32);
   const crinkleFilter = ac.createBiquadFilter();
@@ -186,7 +84,6 @@ export function playPeel(correct: boolean): void {
   crinkle.start(now);
   crinkle.stop(now + 0.32);
 
-  // 2. Rip: filter sweep noise, the tear (180 – 400ms)
   const rip = ac.createBufferSource();
   rip.buffer = noiseBuffer(ac, 0.22);
   const ripFilter = ac.createBiquadFilter();
@@ -202,7 +99,6 @@ export function playPeel(correct: boolean): void {
   rip.start(now + 0.18);
   rip.stop(now + 0.4);
 
-  // 3. Snap: low sine thunk (400 – 500ms)
   const snap = ac.createOscillator();
   snap.type = 'sine';
   snap.frequency.setValueAtTime(150, now + 0.4);
@@ -213,31 +109,25 @@ export function playPeel(correct: boolean): void {
   snap.connect(snapGain).connect(ac.destination);
   snap.start(now + 0.4);
   snap.stop(now + 0.52);
-
 }
 
-// Skill-retired celebration — bright arpeggio flourish, ~2s.
-// C major up + a ringing bell top note.
+// Skill-retired fanfare — bright arpeggio flourish, ~2s. Same one every retire.
 export function playSkillRetired(): void {
   const ac = getCtx();
   if (!ac) return;
   const now = ac.currentTime;
 
-  // Ascending run: C5, E5, G5, C6, E6
   const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
   notes.forEach((f, i) => {
     scheduleNote(ac, f, now + i * 0.09, 0.55, 0.1, { type: 'sine', partial: true, filterHz: 4000 });
   });
 
-  // Sustained C-major triad pad underneath for body
   [261.63, 329.63, 392.0].forEach((f) => {
     scheduleNote(ac, f, now + 0.12, 1.6, 0.055, { type: 'triangle', filterHz: 2200 });
   });
 
-  // Ringing bell on the top
   scheduleNote(ac, 2093, now + 0.5, 1.4, 0.05, { type: 'sine' });
 
-  // Subtle high sparkle sweep
   const spk = ac.createOscillator();
   spk.type = 'sine';
   spk.frequency.setValueAtTime(2400, now);
@@ -250,4 +140,3 @@ export function playSkillRetired(): void {
   spk.start(now);
   spk.stop(now + 0.55);
 }
-
