@@ -5,7 +5,7 @@ import { NextRequest } from 'next/server';
 import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
 
 const PROMPT_TEMPLATE = readFileSync(
-  path.join(process.cwd(), 'src/app/api/feedback/prompt.md'),
+  path.join(process.cwd(), '..', 'feedback_agent_prompt.md'),
   'utf8'
 );
 
