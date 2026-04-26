@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { playPeel, playSkillRetired } from '@/lib/audio';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { playPeel, playSkillRetiredHuge, playDigitTick, playLandingHit } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -53,39 +53,132 @@ interface Props {
   onRevealed: () => void;
 }
 
+const PER_DIGIT_LANDING_DELAY = 380;     // each digit lands this much after the previous one
+const TICK_INTERVAL_MS = 55;             // how often we cycle digits during the roll
+const FIREWORKS_DELAY = 80;              // after final digit lands, when fireworks burst
+const BADGE_SLAM_DELAY = 180;            // after final digit lands, when the +points slams in
+
+type FireworkBurst = {
+  id: number;
+  cx: number; // % of viewport
+  cy: number; // % of viewport
+  color: string;
+  count: number;
+  startMs: number;
+};
+
+const FIREWORK_COLORS = ['#ff5e5e', '#ffce42', '#42c47a', '#5b9eff', '#d56bff', '#ff9450'];
+
 export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Props) {
   const [line] = useState(() => LINES[Math.floor(Math.random() * LINES.length)]);
-  const [displayScore, setDisplayScore] = useState<number>(scoreBefore);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [committed, setCommitted] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
+
+  const beforeStr = String(Math.round(scoreBefore));
+  const afterStr = String(Math.round(scoreAfter));
+  const width = Math.max(beforeStr.length, afterStr.length);
+  const fromStr = beforeStr.padStart(width, ' ');
+  const toStr = afterStr.padStart(width, ' ');
+
+  const [rollingDigits, setRollingDigits] = useState<string[]>(() => fromStr.split(''));
+  const [landed, setLanded] = useState<boolean[]>(() => fromStr.split('').map(() => false));
+  const [allLanded, setAllLanded] = useState(false);
+  const [showBadge, setShowBadge] = useState(false);
+  const [bursts, setBursts] = useState<FireworkBurst[]>([]);
+
   const pointerStartX = useRef(0);
   const pointerId = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    // Fanfare fires immediately. Same one every time.
-    playSkillRetired();
+  const delta = scoreAfter - scoreBefore;
+  const deltaLabel = (Math.round(delta * 10) / 10).toFixed(1);
 
-    // Tween the score number from before → after over ~1.4s.
+  const landingTimes = useMemo(() => {
+    return fromStr.split('').map((_, i) => (i + 1) * PER_DIGIT_LANDING_DELAY + 250);
+  }, [fromStr]);
+
+  const fireFireworks = useCallback(() => {
+    const now = performance.now();
+    const positions = [
+      { cx: 22, cy: 28 },
+      { cx: 78, cy: 32 },
+      { cx: 50, cy: 16 },
+      { cx: 30, cy: 72 },
+      { cx: 72, cy: 70 },
+      { cx: 50, cy: 48 },
+    ];
+    let id = now;
+    const newBursts: FireworkBurst[] = positions.map((p, i) => ({
+      id: id++,
+      cx: p.cx + (Math.random() - 0.5) * 10,
+      cy: p.cy + (Math.random() - 0.5) * 10,
+      color: FIREWORK_COLORS[i % FIREWORK_COLORS.length],
+      count: 22,
+      startMs: i * 130,
+    }));
+    setBursts(newBursts);
+    setTimeout(() => setBursts([]), 2600);
+  }, []);
+
+  useEffect(() => {
+    playSkillRetiredHuge();
+
     const start = performance.now();
-    const duration = 1400;
     let raf = 0;
+    let lastTick = 0;
+    let finalized = false;
+
+    const targets = toStr.split('');
+    const sources = fromStr.split('');
+    const landedLocal = sources.map(() => false);
+
     const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplayScore(scoreBefore + (scoreAfter - scoreBefore) * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
+      const elapsed = now - start;
+
+      for (let i = 0; i < targets.length; i++) {
+        if (!landedLocal[i] && elapsed >= landingTimes[i]) {
+          landedLocal[i] = true;
+          const ix = i;
+          setLanded((prev) => prev.map((v, j) => (j === ix ? true : v)));
+          setRollingDigits((prev) => prev.map((v, j) => (j === ix ? targets[ix] : v)));
+          if (targets[ix] !== ' ') playDigitTick(ix);
+        }
+      }
+
+      if (now - lastTick >= TICK_INTERVAL_MS) {
+        lastTick = now;
+        setRollingDigits((prev) =>
+          prev.map((cur, i) => {
+            if (landedLocal[i]) return targets[i];
+            if (sources[i] === ' ' && targets[i] === ' ') return ' ';
+            return String(Math.floor(Math.random() * 10));
+          })
+        );
+      }
+
+      const everyoneLanded = landedLocal.every(Boolean);
+      if (!everyoneLanded) {
+        raf = requestAnimationFrame(tick);
+      } else if (!finalized) {
+        finalized = true;
+        setAllLanded(true);
+        playLandingHit();
+        setTimeout(() => fireFireworks(), FIREWORKS_DELAY);
+        setTimeout(() => setShowBadge(true), BADGE_SLAM_DELAY);
+      }
     };
     raf = requestAnimationFrame(tick);
 
     const t1 = setTimeout(() => setCelebrate(true), 200);
+
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(t1);
     };
-  }, [scoreBefore, scoreAfter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
@@ -143,7 +236,6 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
   const dragProgress = Math.min(1, -dragX / 90);
   const cornerLift = 18 + dragProgress * 40;
-  const delta = scoreAfter - scoreBefore;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -159,10 +251,6 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={() => {
-          if (committed) return;
-          if (Math.abs(dragX) < 4) commit();
-        }}
       >
         <div className="h-full w-full flex flex-col items-center justify-center px-6">
           <div className="w-full max-w-md flex flex-col items-center">
@@ -170,18 +258,34 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
               Projected exam score
             </p>
 
-            <div className={`mb-2 ${celebrate ? 'celebrate-pop' : ''}`}>
-              <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none">
-                {Math.round(displayScore)}
+            <div className={`mb-2 flex items-baseline ${celebrate ? 'celebrate-pop' : ''} ${allLanded ? 'score-land-pop' : ''}`}>
+              <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none flex">
+                {rollingDigits.map((d, i) => (
+                  <span
+                    key={i}
+                    className={`slot-digit ${landed[i] ? 'slot-digit-landed' : 'slot-digit-rolling'}`}
+                    style={{
+                      minWidth: d === ' ' ? '0' : '0.62em',
+                      display: 'inline-block',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {d === ' ' ? '' : d}
+                  </span>
+                ))}
               </span>
               <span className="text-[36px] font-semibold text-charcoal-muted">%</span>
             </div>
 
-            {delta > 0 && (
-              <p className="text-[15px] text-green font-semibold tabular-nums mb-10">
-                +{(Math.round(delta * 10) / 10).toFixed(1)} points
-              </p>
-            )}
+            <div className="h-12 mb-10 flex items-center justify-center">
+              {delta > 0 && showBadge && (
+                <div className="badge-slam">
+                  <span className="inline-block px-5 py-2 rounded-full bg-green text-cream text-[20px] font-bold tabular-nums shadow-lg">
+                    +{deltaLabel} points
+                  </span>
+                </div>
+              )}
+            </div>
 
             <p className="text-center text-[17px] text-charcoal leading-relaxed max-w-sm">
               {line}
@@ -214,7 +318,69 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
             filter: 'drop-shadow(-2px -2px 6px rgba(0,0,0,0.08))',
           }}
         />
+
+        {/* Fireworks layer */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {bursts.map((b) => (
+            <FireworkBurstView key={b.id} burst={b} />
+          ))}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function FireworkBurstView({ burst }: { burst: FireworkBurst }) {
+  const particles = useMemo(() => {
+    const out: { i: number; px: number; py: number; size: number; life: number }[] = [];
+    for (let i = 0; i < burst.count; i++) {
+      const angle = (i / burst.count) * Math.PI * 2 + Math.random() * 0.25;
+      const dist = 130 + Math.random() * 110;
+      out.push({
+        i,
+        px: Math.cos(angle) * dist,
+        py: Math.sin(angle) * dist,
+        size: 6 + Math.random() * 6,
+        life: 1100 + Math.random() * 600,
+      });
+    }
+    return out;
+  }, [burst.count]);
+
+  return (
+    <div
+      className="absolute"
+      style={{
+        left: `${burst.cx}%`,
+        top: `${burst.cy}%`,
+      }}
+    >
+      <span
+        className="firework-flash"
+        style={{
+          background: burst.color,
+          color: burst.color,
+          animationDelay: `${burst.startMs}ms`,
+        }}
+      />
+      {particles.map((p) => (
+        <span
+          key={p.i}
+          className="firework-particle"
+          style={
+            {
+              ['--px' as string]: `${p.px}px`,
+              ['--py' as string]: `${p.py}px`,
+              ['--life' as string]: `${p.life}ms`,
+              ['--delay' as string]: `${burst.startMs}ms`,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              background: burst.color,
+              color: burst.color,
+            } as React.CSSProperties
+          }
+        />
+      ))}
     </div>
   );
 }

@@ -266,3 +266,81 @@ body {
   animation: petal-fall var(--life, 5s) linear var(--delay, 0s) both;
   box-shadow: 0 0 6px rgba(244,114,182,0.4);
 }
+
+/* ===== Slot machine score roll ===== */
+@keyframes slot-roll-jitter {
+  0%   { transform: translateY(-8%); }
+  50%  { transform: translateY(8%); }
+  100% { transform: translateY(-8%); }
+}
+.slot-digit {
+  position: relative;
+  will-change: transform;
+}
+.slot-digit-rolling {
+  animation: slot-roll-jitter 90ms linear infinite;
+  filter: blur(0.6px);
+  color: var(--charcoal, #2a2a2a);
+}
+@keyframes slot-digit-land {
+  0%   { transform: translateY(40%) scale(1.25); filter: blur(2px); opacity: 0.4; }
+  60%  { transform: translateY(-6%) scale(1.05); filter: blur(0); opacity: 1; }
+  100% { transform: translateY(0) scale(1); filter: blur(0); opacity: 1; }
+}
+.slot-digit-landed {
+  animation: slot-digit-land 260ms cubic-bezier(0.22, 1.4, 0.36, 1) both;
+}
+
+/* Score-pop on full landing — the whole number scales up briefly */
+@keyframes score-land-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.18); text-shadow: 0 0 28px rgba(244, 158, 76, 0.65), 0 0 60px rgba(244, 158, 76, 0.35); }
+  70%  { transform: scale(0.97); }
+  100% { transform: scale(1); text-shadow: none; }
+}
+.score-land-pop {
+  animation: score-land-pop 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* +X.X points badge — slams in from below */
+@keyframes badge-slam {
+  0%   { transform: translateY(60px) scale(0.4); opacity: 0; }
+  60%  { transform: translateY(-6px) scale(1.18); opacity: 1; }
+  78%  { transform: translateY(2px) scale(0.96); }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.badge-slam {
+  animation: badge-slam 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Fireworks */
+@keyframes firework-particle-fly {
+  0%   { transform: translate(0, 0) scale(0.4); opacity: 0; }
+  10%  { opacity: 1; transform: translate(calc(var(--px) * 0.18), calc(var(--py) * 0.18)) scale(1); }
+  100% { transform: translate(var(--px), calc(var(--py) + 60px)) scale(0.2); opacity: 0; }
+}
+.firework-particle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 9999px;
+  pointer-events: none;
+  box-shadow: 0 0 16px currentColor, 0 0 32px currentColor;
+  animation: firework-particle-fly var(--life, 1400ms) cubic-bezier(0.16, 0.84, 0.44, 1) var(--delay, 0s) both;
+}
+@keyframes firework-flash {
+  0%   { transform: scale(0.2); opacity: 0; }
+  20%  { transform: scale(2); opacity: 1; }
+  100% { transform: scale(3); opacity: 0; }
+}
+.firework-flash {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  pointer-events: none;
+  box-shadow: 0 0 40px currentColor, 0 0 80px currentColor;
+  animation: firework-flash 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

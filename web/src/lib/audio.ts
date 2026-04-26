@@ -111,6 +111,142 @@ export function playPeel(): void {
   snap.stop(now + 0.52);
 }
 
+// Slot-machine digit click — short, bright, percussive. Pitched up per column
+// so a multi-digit number feels like an ascending odometer.
+export function playDigitTick(index: number): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+  const base = 1400 + index * 220;
+
+  const o = ac.createOscillator();
+  o.type = 'square';
+  o.frequency.setValueAtTime(base, now);
+  o.frequency.exponentialRampToValueAtTime(base * 0.55, now + 0.06);
+
+  const f = ac.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = base;
+  f.Q.value = 6;
+
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.12, now + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+  o.connect(f).connect(g).connect(ac.destination);
+  o.start(now);
+  o.stop(now + 0.1);
+
+  const n = ac.createBufferSource();
+  n.buffer = noiseBuffer(ac, 0.04);
+  const nf = ac.createBiquadFilter();
+  nf.type = 'highpass';
+  nf.frequency.value = 2200;
+  const ng = ac.createGain();
+  ng.gain.setValueAtTime(0.05, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+  n.connect(nf).connect(ng).connect(ac.destination);
+  n.start(now);
+  n.stop(now + 0.05);
+}
+
+// Big landing hit — fires the moment the slot machine lands the final digit.
+export function playLandingHit(): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+
+  const boom = ac.createOscillator();
+  boom.type = 'sine';
+  boom.frequency.setValueAtTime(110, now);
+  boom.frequency.exponentialRampToValueAtTime(45, now + 0.7);
+  const bg = ac.createGain();
+  bg.gain.setValueAtTime(0, now);
+  bg.gain.linearRampToValueAtTime(0.5, now + 0.02);
+  bg.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+  boom.connect(bg).connect(ac.destination);
+  boom.start(now);
+  boom.stop(now + 0.95);
+
+  const cym = ac.createBufferSource();
+  cym.buffer = noiseBuffer(ac, 1.2);
+  const cf = ac.createBiquadFilter();
+  cf.type = 'highpass';
+  cf.frequency.value = 5500;
+  const cg = ac.createGain();
+  cg.gain.setValueAtTime(0, now);
+  cg.gain.linearRampToValueAtTime(0.18, now + 0.08);
+  cg.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+  cym.connect(cf).connect(cg).connect(ac.destination);
+  cym.start(now);
+  cym.stop(now + 1.2);
+
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    scheduleNote(ac, f, now + 0.02 + i * 0.005, 0.9, 0.13, {
+      type: 'sawtooth',
+      partial: true,
+      filterHz: 3000,
+    });
+  });
+  [130.81, 196.0].forEach((f) => {
+    scheduleNote(ac, f, now + 0.02, 1.0, 0.1, { type: 'triangle', filterHz: 1400 });
+  });
+}
+
+// Huge over-the-top fanfare — fires when the peel page mounts.
+// Bigger, longer, multi-layered version of playSkillRetired. ~3.4s.
+export function playSkillRetiredHuge(): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+
+  const run = [392.0, 523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093.0];
+  run.forEach((f, i) => {
+    scheduleNote(ac, f, now + i * 0.085, 0.6, 0.12, {
+      type: 'sawtooth',
+      partial: true,
+      filterHz: 3500,
+    });
+  });
+
+  [130.81, 196.0, 261.63, 392.0].forEach((f, i) => {
+    scheduleNote(ac, f, now + 0.05 + i * 0.01, 2.6, 0.07, {
+      type: 'triangle',
+      filterHz: 2000,
+    });
+  });
+
+  [2637.02, 3135.96, 3951.07, 5274.04].forEach((f, i) => {
+    scheduleNote(ac, f, now + 0.5 + i * 0.18, 0.8, 0.045, { type: 'sine' });
+  });
+
+  const cym = ac.createBufferSource();
+  cym.buffer = noiseBuffer(ac, 1.6);
+  const cf = ac.createBiquadFilter();
+  cf.type = 'highpass';
+  cf.frequency.value = 5000;
+  const cg = ac.createGain();
+  cg.gain.setValueAtTime(0, now);
+  cg.gain.linearRampToValueAtTime(0.22, now + 0.5);
+  cg.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+  cym.connect(cf).connect(cg).connect(ac.destination);
+  cym.start(now);
+  cym.stop(now + 2.0);
+
+  const sub = ac.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(80, now);
+  sub.frequency.exponentialRampToValueAtTime(40, now + 0.6);
+  const sg = ac.createGain();
+  sg.gain.setValueAtTime(0.55, now);
+  sg.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+  sub.connect(sg).connect(ac.destination);
+  sub.start(now);
+  sub.stop(now + 0.85);
+
+  scheduleNote(ac, 2093, now + 1.6, 1.6, 0.07, { type: 'sine' });
+}
+
 // Skill-retired fanfare — bright arpeggio flourish, ~2s. Same one every retire.
 export function playSkillRetired(): void {
   const ac = getCtx();
