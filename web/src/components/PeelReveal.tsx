@@ -153,10 +153,12 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
       }
 
       const t = Math.min(1, elapsed / ROLL_DURATION_MS);
-      // Ease-in cubic: starts slow, accelerates. Pairs with the anticipation
-      // audio building, and lands the final integer exactly at t=1 so the
-      // celebration fires precisely on the climax — no dead beat at the top.
-      const eased = t * t * t;
+      // Ease-in quadratic: starts slow, accelerates. Pairs with the
+      // anticipation audio building, and lands the final integer exactly at
+      // t=1 so the celebration fires precisely on the climax. Quadratic (vs
+      // cubic) gets the first tick out the door sooner so the page doesn't
+      // feel stuck on the original number.
+      const eased = t * t;
       const value = Math.round(beforeNum + (afterNum - beforeNum) * eased);
 
       if (value !== lastValue) {
