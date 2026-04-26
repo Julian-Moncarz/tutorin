@@ -184,7 +184,7 @@ export default function ExercisePage() {
     });
     const r = getExamReadiness(curriculum, sim);
     progressRef.current = sim;
-    return (r.estimatedScoreLow + r.estimatedScoreHigh) / 2;
+    return r.estimatedScore;
   }, [curriculum]);
 
   const startPrefetch = useCallback(async (
@@ -256,9 +256,9 @@ export default function ExercisePage() {
     let scoreBefore = 0;
     if (curriculum) {
       const r = getExamReadiness(curriculum, progressRef.current || {});
-      scoreBefore = (r.estimatedScoreLow + r.estimatedScoreHigh) / 2;
+      scoreBefore = r.estimatedScore;
     } else if (readinessRef.current) {
-      scoreBefore = (readinessRef.current.estimatedScoreLow + readinessRef.current.estimatedScoreHigh) / 2;
+      scoreBefore = readinessRef.current.estimatedScore;
     }
 
     const scoreAfter = simulateScoreAfter(currentSkill);

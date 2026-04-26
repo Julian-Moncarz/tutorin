@@ -4,12 +4,7 @@ import {
   NextSkillRecommendation,
   Progress,
   SkillDefinition,
-  WeakSpot,
 } from './types';
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
 
 export function getSkillName(skill: SkillDefinition): string {
   return skill.name;
@@ -55,16 +50,9 @@ export function getNextSkill(
   return null;
 }
 
-// P(correct on exam) per skill. Under teach-till-✅ a skill is either
-// un-retired (no signal) or retired (1 correct attempt).
-function pCorrectForSkill(skillName: string, progress: Progress): number {
-  return isRetired(skillName, progress) ? 0.85 : 0.35;
-}
-
-function uncertaintyForSkill(skillName: string, progress: Progress): number {
-  return isRetired(skillName, progress) ? 0.08 : 0.25;
-}
-
+// Projected exam score = sum of examWeight for skills you've actually
+// earned (alreadyKnown + retired). Skills are binary in this system —
+// retired or not — so the score is too. No probability, no band.
 export function getExamReadiness(
   curriculum: Curriculum,
   progress: Progress
@@ -72,51 +60,22 @@ export function getExamReadiness(
   const alreadyKnown = curriculum.alreadyKnown || [];
   const alreadyKnownPct = alreadyKnown.reduce((acc, s) => acc + (s.examWeight || 0), 0);
 
-  const allSkills = getAllSkillsOrdered(curriculum);
-  if (allSkills.length === 0) {
-    const pct = Math.round(alreadyKnownPct);
-    return {
-      estimatedScoreLow: pct,
-      estimatedScoreHigh: pct,
-      alreadyKnownPct: Math.round(alreadyKnownPct),
-      readiness: alreadyKnownPct / 100,
-      biggestGains: [],
-    };
-  }
-
-  let weightedP = 0;
-  let weightedUncertainty = 0;
+  let retiredPct = 0;
   let totalCurriculumWeight = 0;
-  const weakSpots: WeakSpot[] = [];
-
-  for (const skill of allSkills) {
+  for (const skill of getAllSkillsOrdered(curriculum)) {
     const def = findSkill(curriculum, skill);
     const w = def?.examWeight ?? 0;
-    const p = pCorrectForSkill(skill, progress);
-    const u = uncertaintyForSkill(skill, progress);
-    weightedP += p * w;
-    weightedUncertainty += u * w;
     totalCurriculumWeight += w;
-    weakSpots.push({ skill, pCorrect: p });
+    if (isRetired(skill, progress)) retiredPct += w;
   }
 
-  const center = alreadyKnownPct + weightedP;
-  const uncertainty = totalCurriculumWeight > 0 ? weightedUncertainty : 0;
-
-  const estimatedScoreLow = Math.round(clamp(center - uncertainty, 0, 100));
-  const estimatedScoreHigh = Math.round(clamp(center + uncertainty, 0, 100));
+  const earned = alreadyKnownPct + retiredPct;
   const totalWeight = alreadyKnownPct + totalCurriculumWeight;
-  const readiness = totalWeight > 0 ? center / totalWeight : 0;
-
-  const biggestGains = [...weakSpots]
-    .sort((a, b) => a.pCorrect - b.pCorrect)
-    .slice(0, 3);
+  const readiness = totalWeight > 0 ? earned / totalWeight : 0;
 
   return {
-    estimatedScoreLow,
-    estimatedScoreHigh,
+    estimatedScore: Math.round(earned),
     alreadyKnownPct: Math.round(alreadyKnownPct),
     readiness,
-    biggestGains,
   };
 }

@@ -99,18 +99,11 @@ export default function Dashboard() {
             Projected exam score
           </p>
           <p className="mt-2 text-[26px] leading-none font-semibold text-charcoal">
-            {readiness.estimatedScoreLow}–{readiness.estimatedScoreHigh}%
+            {readiness.estimatedScore}%
           </p>
           <p className="mt-2 text-[12px] text-charcoal-muted">
             Already know: {readiness.alreadyKnownPct}%
           </p>
-          {readiness.biggestGains.length > 0 && (
-            <p className="mt-2 text-[13px] text-charcoal-secondary leading-relaxed">
-              Biggest score gains left:
-              {' '}
-              {readiness.biggestGains.map((gain) => gain.skill).join(' • ')}
-            </p>
-          )}
         </div>
       )}
 
