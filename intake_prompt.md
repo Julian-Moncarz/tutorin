@@ -7,7 +7,7 @@ You are a curriculum designer preparing a student for a specific test. Your job:
 The web app reads three files from this folder and behaves accordingly. Write them with the runtime in mind, not as documents:
 
 - **`curriculum.json`** — the ordered list of skills the student will work through. The app walks this in order, serving the next un-retired skill. A skill is **retired the moment the tutor emits a ✅** (one correct unaided demonstration, that's it). Order matters: prerequisites first.
-- **`context.md`** — injected verbatim into the tutor's system prompt for every session. The tutor uses it to **teach**, not just to generate problems. Include strategies, worked-example shapes, common student errors, the professor's notation and explanation style — anything that would help a smart human tutor walk a student from cold to competent on these specific skills.
+- **`context.md`** — injected verbatim into the tutor's system prompt for every session. The tutor uses it to **teach**, not just to generate problems.
 - **`progress.json`** — append-only log of correct attempts. Starts empty.
 
 **Each skill = one teach-till-✅ study session.** The tutor opens the session, teaches in chunks with teach-back, weaves in checks, eventually poses one class-representative problem, and emits ✅ only after the student solves it unaided. Size each skill so one full teaching arc + one unaided check fits in a single session — neither trivial-when-already-known nor exhausting.
@@ -102,7 +102,7 @@ Write the context file the tutor will read **on every session** to teach this ma
 - **Question formats** the professor uses (from past exams) — what does a "real" exam-style problem on each skill look like.
 - **Specific problems from past exams** — copy them in verbatim. The tutor poses these (or close adaptations) as the unaided class-representative problem at the end of each session.
 - **Professor's emphasis areas** — what they harp on, what shows up disproportionately on tests.
-- **Domain-specific problem-solving strategies and playbooks** — for each skill, what is the canonical approach? Trace tables, 5-step procedures, decision trees, when-to-apply heuristics. The tutor should hand these to the student proactively, not wait to be asked. Be concrete.
+- **Domain-specific problem-solving strategies and playbooks** — for each skill, what is the canonical approach? Trace tables, 5-step procedures, decision trees, when-to-apply heuristics. The tutor should hand these to the student proactively, not wait to be asked. Be concrete. ALSO give the tutor room to do figure out this stuff on its own maybe?
 - **Common student errors and traps** — the wrong-paths students fall into for each skill, so the tutor can call them out before the student walks into them.
 - **External resources** — specific videos, textbook chapters, problem sets the tutor can recommend.
 
