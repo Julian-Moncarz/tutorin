@@ -53,11 +53,10 @@ interface Props {
   onRevealed: () => void;
 }
 
-const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the slot roll starts
-const PER_DIGIT_LANDING_DELAY = 1140;    // each digit lands this much after the previous one
-const TICK_INTERVAL_MS = 70;             // how often we cycle digits during the roll
-const FIREWORKS_DELAY = 80;              // after final digit lands, when fireworks burst
-const BADGE_SLAM_DELAY = 180;            // after final digit lands, when the +points slams in
+const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the count-up starts
+const ROLL_DURATION_MS = 2200;           // total time to count from before → after
+const FIREWORKS_DELAY = 80;              // after landing, when fireworks burst
+const BADGE_SLAM_DELAY = 180;            // after landing, when the +percent slams in
 
 type FireworkBurst = {
   id: number;
@@ -83,12 +82,15 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
   const fromStr = beforeStr.padStart(width, ' ');
   const toStr = afterStr.padStart(width, ' ');
 
-  const [rollingDigits, setRollingDigits] = useState<string[]>(() => fromStr.split(''));
-  const [landed, setLanded] = useState<boolean[]>(() => fromStr.split('').map(() => false));
-  const [rollStarted, setRollStarted] = useState(false);
+  const beforeNum = Math.round(scoreBefore);
+  const afterNum = Math.round(scoreAfter);
+
+  const [currentValue, setCurrentValue] = useState<number>(beforeNum);
   const [allLanded, setAllLanded] = useState(false);
   const [showBadge, setShowBadge] = useState(false);
   const [bursts, setBursts] = useState<FireworkBurst[]>([]);
+  // Per-digit "just changed" tracking so each tick gets a tiny pop animation.
+  const [bumpKey, setBumpKey] = useState<number[]>(() => fromStr.split('').map(() => 0));
 
   const pointerStartX = useRef(0);
   const pointerId = useRef<number | null>(null);
@@ -97,9 +99,9 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
   const delta = scoreAfter - scoreBefore;
   const deltaLabel = (Math.round(delta * 10) / 10).toFixed(1);
 
-  const landingTimes = useMemo(() => {
-    return fromStr.split('').map((_, i) => PRE_ROLL_HOLD_MS + (i + 1) * PER_DIGIT_LANDING_DELAY);
-  }, [fromStr]);
+  // Render the current integer as a fixed-width digit row.
+  const currentStr = String(currentValue).padStart(width, ' ');
+  const targetStr = toStr;
 
   const fireFireworks = useCallback(() => {
     const now = performance.now();
@@ -126,54 +128,60 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
   useEffect(() => {
     // Hold silently on the original value for a beat. Fanfare fires the moment
-    // the slot roll starts, so the audio and the visual move together.
+    // the count-up starts, so the audio and the visual move together.
     const fanfareTimer = setTimeout(() => playSkillRetiredHuge(), PRE_ROLL_HOLD_MS);
 
-    const start = performance.now();
     let raf = 0;
-    let lastTick = 0;
     let finalized = false;
-
-    const targets = toStr.split('');
-    const sources = fromStr.split('');
-    const landedLocal = sources.map(() => false);
+    let lastValue = beforeNum;
+    let rollStartTime = 0;
 
     const tick = (now: number) => {
-      const elapsed = now - start;
-
-      for (let i = 0; i < targets.length; i++) {
-        if (!landedLocal[i] && elapsed >= landingTimes[i]) {
-          landedLocal[i] = true;
-          const ix = i;
-          setLanded((prev) => prev.map((v, j) => (j === ix ? true : v)));
-          setRollingDigits((prev) => prev.map((v, j) => (j === ix ? targets[ix] : v)));
-          if (targets[ix] !== ' ') playDigitTick(ix);
-        }
-      }
-
-      // Pre-roll hold: show the original value until the hold elapses.
-      if (elapsed < PRE_ROLL_HOLD_MS) {
+      if (rollStartTime === 0) {
+        // Wait until the pre-roll hold elapses before starting the tween clock.
+        // performance.now() at mount lives outside this closure; use a ref-like
+        // capture by stamping rollStartTime once.
+        rollStartTime = now + PRE_ROLL_HOLD_MS;
         raf = requestAnimationFrame(tick);
         return;
       }
-      if (!rollStarted) setRollStarted(true);
 
-      if (now - lastTick >= TICK_INTERVAL_MS) {
-        lastTick = now;
-        setRollingDigits((prev) =>
-          prev.map((cur, i) => {
-            if (landedLocal[i]) return targets[i];
-            if (sources[i] === ' ' && targets[i] === ' ') return ' ';
-            return String(Math.floor(Math.random() * 10));
-          })
-        );
+      const elapsed = now - rollStartTime;
+      if (elapsed < 0) {
+        raf = requestAnimationFrame(tick);
+        return;
       }
 
-      const everyoneLanded = landedLocal.every(Boolean);
-      if (!everyoneLanded) {
+      const t = Math.min(1, elapsed / ROLL_DURATION_MS);
+      // Ease-out cubic: starts fast, settles in.
+      const eased = 1 - Math.pow(1 - t, 3);
+      const value = Math.round(beforeNum + (afterNum - beforeNum) * eased);
+
+      if (value !== lastValue) {
+        // Figure out which digit position(s) changed so we can pop them.
+        const prevStr = String(lastValue).padStart(width, ' ');
+        const nextStr = String(value).padStart(width, ' ');
+        const changed: number[] = [];
+        for (let i = 0; i < width; i++) {
+          if (prevStr[i] !== nextStr[i]) changed.push(i);
+        }
+        // Tick sound on the rightmost (ones) changing digit.
+        if (changed.length > 0) playDigitTick(changed[changed.length - 1]);
+        setBumpKey((prev) => prev.map((v, i) => (changed.includes(i) ? v + 1 : v)));
+        setCurrentValue(value);
+        lastValue = value;
+      }
+
+      if (t < 1) {
         raf = requestAnimationFrame(tick);
       } else if (!finalized) {
         finalized = true;
+        // Make sure we landed exactly on the target (rounding can leave a gap
+        // for fractional inputs).
+        if (lastValue !== afterNum) {
+          setCurrentValue(afterNum);
+          setBumpKey((prev) => prev.map((v) => v + 1));
+        }
         setAllLanded(true);
         playLandingHit();
         setTimeout(() => fireFireworks(), FIREWORKS_DELAY);
@@ -272,10 +280,10 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
             <div className={`mb-2 flex items-baseline ${celebrate ? 'celebrate-pop' : ''} ${allLanded ? 'score-land-pop' : ''}`}>
               <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none flex">
-                {rollingDigits.map((d, i) => (
+                {currentStr.split('').map((d, i) => (
                   <span
-                    key={i}
-                    className={`slot-digit ${landed[i] ? 'slot-digit-landed' : rollStarted ? 'slot-digit-rolling' : ''}`}
+                    key={`${i}-${bumpKey[i]}`}
+                    className="slot-digit slot-digit-bump"
                     style={{
                       minWidth: d === ' ' ? '0' : '0.62em',
                       display: 'inline-block',

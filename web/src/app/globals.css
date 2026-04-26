@@ -267,28 +267,18 @@ body {
   box-shadow: 0 0 6px rgba(244,114,182,0.4);
 }
 
-/* ===== Slot machine score roll ===== */
-@keyframes slot-roll-jitter {
-  0%   { transform: translateY(-8%); }
-  50%  { transform: translateY(8%); }
-  100% { transform: translateY(-8%); }
-}
+/* ===== Score count-up odometer ===== */
 .slot-digit {
   position: relative;
   will-change: transform;
 }
-.slot-digit-rolling {
-  animation: slot-roll-jitter 90ms linear infinite;
-  filter: blur(0.6px);
-  color: var(--charcoal, #2a2a2a);
+@keyframes slot-digit-bump {
+  0%   { transform: translateY(-22%); opacity: 0.55; }
+  55%  { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
 }
-@keyframes slot-digit-land {
-  0%   { transform: translateY(40%) scale(1.25); filter: blur(2px); opacity: 0.4; }
-  60%  { transform: translateY(-6%) scale(1.05); filter: blur(0); opacity: 1; }
-  100% { transform: translateY(0) scale(1); filter: blur(0); opacity: 1; }
-}
-.slot-digit-landed {
-  animation: slot-digit-land 260ms cubic-bezier(0.22, 1.4, 0.36, 1) both;
+.slot-digit-bump {
+  animation: slot-digit-bump 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Score-pop on full landing — the whole number scales up briefly */
