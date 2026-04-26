@@ -2,7 +2,12 @@ import { readFileSync, mkdirSync, existsSync, rmSync } from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 import { NextRequest } from 'next/server';
-import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
+import { deleteSession, getOrCreateSession, hasSession } from '@/lib/claudeSessions';
+import {
+  getActiveFeedbackChat,
+  saveClaudeSessionId,
+  deleteActiveFeedbackChat,
+} from '@/lib/activeFeedbackChat';
 
 const PROMPT_TEMPLATE = readFileSync(
   path.join(process.cwd(), '..', 'feedback_agent_prompt.md'),
@@ -48,10 +53,31 @@ export async function POST(req: NextRequest) {
     const sessionDir = path.join(getStudyDir(), 'feedback', 'drafts', sessionId);
     mkdirSync(sessionDir, { recursive: true });
 
+    // If the in-memory session is gone (Node restart) but we have a persisted
+    // claude session id from a previous incarnation, resume against it. The
+    // claude CLI keeps its own JSONL transcript and will reconstitute the
+    // conversation from there. The system prompt baked into the original
+    // session is preserved, so we don't pass --system-prompt on resume.
+    let resumeId: string | undefined;
+    if (!hasSession(sessionId)) {
+      const persisted = getActiveFeedbackChat(sessionId);
+      if (persisted) {
+        resumeId = persisted.claudeSessionId;
+      }
+    }
+
+    const onClaudeSessionId = (claudeId: string) => {
+      try {
+        saveClaudeSessionId(sessionId, claudeId);
+      } catch (err) {
+        console.error('[feedback] failed to persist claudeSessionId', err);
+      }
+    };
+
     const { session, isNew } = getOrCreateSession(
       sessionId,
       () => buildSystemPrompt(sessionDir),
-      { turnTimeoutMs: FEEDBACK_TURN_TIMEOUT_MS }
+      { turnTimeoutMs: FEEDBACK_TURN_TIMEOUT_MS, resumeId, onClaudeSessionId }
     );
 
     // If the UI opens a fresh session without typing anything, prompt Pimberton
@@ -174,6 +200,7 @@ export async function DELETE(req: NextRequest) {
   }
   const sessionDir = path.join(getStudyDir(), 'feedback', 'drafts', sessionId);
   cleanupSandbox(sessionDir);
+  deleteActiveFeedbackChat(sessionId);
   deleteSession(sessionId);
   return new Response(JSON.stringify({ ok: true }), {
     headers: { 'Content-Type': 'application/json' },
