@@ -54,8 +54,8 @@ interface Props {
 }
 
 const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the slot roll starts
-const PER_DIGIT_LANDING_DELAY = 380;     // each digit lands this much after the previous one
-const TICK_INTERVAL_MS = 55;             // how often we cycle digits during the roll
+const PER_DIGIT_LANDING_DELAY = 1140;    // each digit lands this much after the previous one
+const TICK_INTERVAL_MS = 70;             // how often we cycle digits during the roll
 const FIREWORKS_DELAY = 80;              // after final digit lands, when fireworks burst
 const BADGE_SLAM_DELAY = 180;            // after final digit lands, when the +points slams in
 
@@ -125,7 +125,9 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
   }, []);
 
   useEffect(() => {
-    playSkillRetiredHuge();
+    // Hold silently on the original value for a beat. Fanfare fires the moment
+    // the slot roll starts, so the audio and the visual move together.
+    const fanfareTimer = setTimeout(() => playSkillRetiredHuge(), PRE_ROLL_HOLD_MS);
 
     const start = performance.now();
     let raf = 0;
@@ -185,6 +187,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(t1);
+      clearTimeout(fanfareTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -296,7 +299,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
                     +{deltaLabel}
                   </span>
                   <span className="text-[14px] uppercase tracking-[0.16em] font-semibold opacity-80 ml-1">
-                    points
+                    percent
                   </span>
                 </div>
               )}
