@@ -153,8 +153,10 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
       }
 
       const t = Math.min(1, elapsed / ROLL_DURATION_MS);
-      // Ease-out cubic: starts fast, settles in.
-      const eased = 1 - Math.pow(1 - t, 3);
+      // Ease-in cubic: starts slow, accelerates. Pairs with the anticipation
+      // audio building, and lands the final integer exactly at t=1 so the
+      // celebration fires precisely on the climax — no dead beat at the top.
+      const eased = t * t * t;
       const value = Math.round(beforeNum + (afterNum - beforeNum) * eased);
 
       if (value !== lastValue) {
@@ -172,20 +174,17 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
         lastValue = value;
       }
 
-      if (t < 1) {
-        raf = requestAnimationFrame(tick);
-      } else if (!finalized) {
+      // Fire the celebration the moment we hit the final number, not when the
+      // tween clock finishes. With ease-out the integer lands well before t=1,
+      // and waiting would leave a dead beat on the final value.
+      if (lastValue >= afterNum && !finalized) {
         finalized = true;
-        // Make sure we landed exactly on the target (rounding can leave a gap
-        // for fractional inputs).
-        if (lastValue !== afterNum) {
-          setCurrentValue(afterNum);
-          setBumpKey((prev) => prev.map((v) => v + 1));
-        }
         setAllLanded(true);
         playRewardFanfare();
         setTimeout(() => fireFireworks(), FIREWORKS_DELAY);
         setTimeout(() => setShowBadge(true), BADGE_SLAM_DELAY);
+      } else if (t < 1) {
+        raf = requestAnimationFrame(tick);
       }
     };
     raf = requestAnimationFrame(tick);
