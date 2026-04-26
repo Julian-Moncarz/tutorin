@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { playPeel, playSkillRetiredHuge, playDigitTick, playLandingHit } from '@/lib/audio';
+import { playPeel, playAnticipation, playRewardFanfare, playDigitTick } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -129,7 +129,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
   useEffect(() => {
     // Hold silently on the original value for a beat. Fanfare fires the moment
     // the count-up starts, so the audio and the visual move together.
-    const fanfareTimer = setTimeout(() => playSkillRetiredHuge(), PRE_ROLL_HOLD_MS);
+    const fanfareTimer = setTimeout(() => playAnticipation(ROLL_DURATION_MS), PRE_ROLL_HOLD_MS);
 
     let raf = 0;
     let finalized = false;
@@ -183,7 +183,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
           setBumpKey((prev) => prev.map((v) => v + 1));
         }
         setAllLanded(true);
-        playLandingHit();
+        playRewardFanfare();
         setTimeout(() => fireFireworks(), FIREWORKS_DELAY);
         setTimeout(() => setShowBadge(true), BADGE_SLAM_DELAY);
       }

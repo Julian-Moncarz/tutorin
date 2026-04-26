@@ -150,6 +150,149 @@ export function playDigitTick(index: number): void {
   n.stop(now + 0.05);
 }
 
+// Anticipation build — fires during the count-up. Drum roll + rising sustained
+// strings + crescendo, no melodic resolution. Duration ~2.2s. Designed to feel
+// suspenseful and unresolved so the landing payoff lands.
+export function playAnticipation(durationMs = 2200): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+  const dur = durationMs / 1000;
+
+  // Timpani-style drum roll (low filtered noise tremolo).
+  const drumRoll = ac.createBufferSource();
+  drumRoll.buffer = noiseBuffer(ac, dur + 0.1);
+  const drumFilter = ac.createBiquadFilter();
+  drumFilter.type = 'lowpass';
+  drumFilter.frequency.value = 220;
+  drumFilter.Q.value = 1.4;
+  const drumGain = ac.createGain();
+  // Build crescendo: starts soft, swells throughout.
+  drumGain.gain.setValueAtTime(0.0, now);
+  drumGain.gain.linearRampToValueAtTime(0.08, now + 0.15);
+  drumGain.gain.linearRampToValueAtTime(0.18, now + dur * 0.5);
+  drumGain.gain.linearRampToValueAtTime(0.42, now + dur);
+  // LFO tremolo for "rolling" feel
+  const lfo = ac.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 14;
+  const lfoGain = ac.createGain();
+  lfoGain.gain.value = 0.16;
+  lfo.connect(lfoGain).connect(drumGain.gain);
+  drumRoll.connect(drumFilter).connect(drumGain).connect(ac.destination);
+  drumRoll.start(now);
+  drumRoll.stop(now + dur + 0.05);
+  lfo.start(now);
+  lfo.stop(now + dur + 0.05);
+
+  // Rising sustained low pad (root + fifth).
+  const pad1 = ac.createOscillator();
+  pad1.type = 'sawtooth';
+  pad1.frequency.setValueAtTime(98, now);                          // G2
+  pad1.frequency.exponentialRampToValueAtTime(174.61, now + dur);  // F3
+  const pf = ac.createBiquadFilter();
+  pf.type = 'lowpass';
+  pf.frequency.setValueAtTime(700, now);
+  pf.frequency.linearRampToValueAtTime(2400, now + dur);
+  const pg = ac.createGain();
+  pg.gain.setValueAtTime(0.0, now);
+  pg.gain.linearRampToValueAtTime(0.04, now + 0.2);
+  pg.gain.linearRampToValueAtTime(0.13, now + dur);
+  pad1.connect(pf).connect(pg).connect(ac.destination);
+  pad1.start(now);
+  pad1.stop(now + dur + 0.05);
+
+  const pad2 = ac.createOscillator();
+  pad2.type = 'sawtooth';
+  pad2.frequency.setValueAtTime(146.83, now);                       // D3
+  pad2.frequency.exponentialRampToValueAtTime(261.63, now + dur);   // C4
+  const pg2 = ac.createGain();
+  pg2.gain.setValueAtTime(0.0, now);
+  pg2.gain.linearRampToValueAtTime(0.03, now + 0.2);
+  pg2.gain.linearRampToValueAtTime(0.1, now + dur);
+  pad2.connect(pf).connect(pg2).connect(ac.destination);
+  pad2.start(now);
+  pad2.stop(now + dur + 0.05);
+
+  // High rising whoosh — bandpassed noise that climbs.
+  const whoosh = ac.createBufferSource();
+  whoosh.buffer = noiseBuffer(ac, dur + 0.1);
+  const wf = ac.createBiquadFilter();
+  wf.type = 'bandpass';
+  wf.Q.value = 4;
+  wf.frequency.setValueAtTime(600, now);
+  wf.frequency.exponentialRampToValueAtTime(7000, now + dur);
+  const wg = ac.createGain();
+  wg.gain.setValueAtTime(0.0, now);
+  wg.gain.linearRampToValueAtTime(0.05, now + 0.3);
+  wg.gain.linearRampToValueAtTime(0.18, now + dur);
+  whoosh.connect(wf).connect(wg).connect(ac.destination);
+  whoosh.start(now);
+  whoosh.stop(now + dur + 0.05);
+}
+
+// Reward fanfare — fires at landing, coinciding with the fireworks. Big
+// triumphant chord stab, ascending bell chimes that match the burst stagger,
+// cymbal crash. ~2.2s.
+export function playRewardFanfare(): void {
+  const ac = getCtx();
+  if (!ac) return;
+  const now = ac.currentTime;
+
+  // Cymbal crash — bright noise burst, longer tail.
+  const crash = ac.createBufferSource();
+  crash.buffer = noiseBuffer(ac, 1.8);
+  const cf = ac.createBiquadFilter();
+  cf.type = 'highpass';
+  cf.frequency.value = 4500;
+  const cg = ac.createGain();
+  cg.gain.setValueAtTime(0.0, now);
+  cg.gain.linearRampToValueAtTime(0.32, now + 0.02);
+  cg.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+  crash.connect(cf).connect(cg).connect(ac.destination);
+  crash.start(now);
+  crash.stop(now + 1.8);
+
+  // Big sub boom on impact.
+  const boom = ac.createOscillator();
+  boom.type = 'sine';
+  boom.frequency.setValueAtTime(85, now);
+  boom.frequency.exponentialRampToValueAtTime(38, now + 0.7);
+  const bg = ac.createGain();
+  bg.gain.setValueAtTime(0, now);
+  bg.gain.linearRampToValueAtTime(0.65, now + 0.02);
+  bg.gain.exponentialRampToValueAtTime(0.001, now + 0.95);
+  boom.connect(bg).connect(ac.destination);
+  boom.start(now);
+  boom.stop(now + 1.0);
+
+  // Triumphant major-chord stab (root + third + fifth + octave).
+  [261.63, 329.63, 392.0, 523.25, 783.99].forEach((f, i) => {
+    scheduleNote(ac, f, now + 0.02 + i * 0.006, 1.4, 0.13, {
+      type: 'sawtooth',
+      partial: true,
+      filterHz: 3500,
+    });
+  });
+  // Bass support
+  [130.81, 196.0].forEach((f) => {
+    scheduleNote(ac, f, now + 0.02, 1.4, 0.11, { type: 'triangle', filterHz: 1500 });
+  });
+
+  // Ascending bell chimes — staggered to feel like fireworks bursts going off.
+  const bells = [1318.51, 1567.98, 1975.53, 2349.32, 2637.02, 3135.96];
+  bells.forEach((f, i) => {
+    scheduleNote(ac, f, now + 0.1 + i * 0.13, 0.8, 0.07, {
+      type: 'sine',
+      partial: true,
+    });
+  });
+
+  // High sparkle line that lingers.
+  scheduleNote(ac, 3951.07, now + 1.0, 1.0, 0.04, { type: 'sine' });
+  scheduleNote(ac, 5274.04, now + 1.3, 0.9, 0.035, { type: 'sine' });
+}
+
 // Big landing hit — fires the moment the slot machine lands the final digit.
 export function playLandingHit(): void {
   const ac = getCtx();
