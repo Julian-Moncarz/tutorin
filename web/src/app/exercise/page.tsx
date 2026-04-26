@@ -7,6 +7,8 @@ import TextareaAutosize from 'react-textarea-autosize';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
+import CodeMirror from '@uiw/react-codemirror';
+import { python } from '@codemirror/lang-python';
 import MotivationPopup from '@/components/MotivationPopup';
 import PeelReveal from '@/components/PeelReveal';
 import WebcamCapture from '@/components/WebcamCapture';
@@ -89,6 +91,8 @@ export default function ExercisePage() {
   const [initializing, setInitializing] = useState(true);
   const [allDone, setAllDone] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [codeMode, setCodeMode] = useState(false);
+  const [code, setCode] = useState('');
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const loadingNextRef = useRef(false);
@@ -164,6 +168,12 @@ export default function ExercisePage() {
         if (skill && !loading && !allDone && !initializing) {
           e.preventDefault();
           setCameraOpen(true);
+        }
+      }
+      if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+        if (skill && !allDone && !initializing) {
+          e.preventDefault();
+          setCodeMode((v) => !v);
         }
       }
     };
@@ -465,6 +475,23 @@ export default function ExercisePage() {
     await doChat(skill, text, convoBeforeReply, imageDataUrl);
   };
 
+  const sendCode = async () => {
+    if (!skill || loading) return;
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    const wrapped = '```python\n' + code + '\n```';
+    const userMessage: DisplayMessage = {
+      id: ++messageIdCounter,
+      role: 'user',
+      content: wrapped,
+    };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setCode('');
+    const convoBeforeReply: ChatMessage[] = newMessages.map(({ role, content }) => ({ role, content }));
+    await doChat(skill, wrapped, convoBeforeReply);
+  };
+
   const handleCameraCapture = useCallback(
     (dataUrl: string) => {
       setCameraOpen(false);
@@ -604,8 +631,10 @@ export default function ExercisePage() {
         </button>
       </div>
 
+      <div className="flex-1 flex min-h-0">
+      <div className={(codeMode ? 'w-1/2 ' : 'w-full ') + 'flex flex-col min-h-0 min-w-0'}>
       <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-10 pt-24 pb-6">
-        <div className="max-w-2xl mx-auto space-y-7">
+        <div className={(codeMode ? 'max-w-none ' : 'max-w-2xl ') + 'mx-auto space-y-7'}>
           {initializing && messages.length === 0 && !streamingText && <Dots />}
           {messages.map((msg) =>
             msg.role === 'assistant' ? (
@@ -640,7 +669,7 @@ export default function ExercisePage() {
       </div>
 
       <div className="flex-shrink-0 px-10 pb-6">
-        <div className="max-w-2xl mx-auto">
+        <div className={(codeMode ? 'max-w-none ' : 'max-w-2xl ') + 'mx-auto'}>
           <div className="border-t border-cream-border/60 pt-4">
             <TextareaAutosize
               ref={chatInputRef}
@@ -659,6 +688,19 @@ export default function ExercisePage() {
               disabled={loading || !skill}
             />
             <div className="flex items-center justify-end gap-4 pt-2">
+              <button
+                onClick={() => setCodeMode((v) => !v)}
+                disabled={!skill}
+                title={codeMode ? 'Hide code editor (⌘⇧E)' : 'Show code editor (⌘⇧E)'}
+                aria-label="Toggle code editor"
+                aria-pressed={codeMode}
+                className={`flex items-center gap-1.5 text-[11px] transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                  codeMode ? 'text-charcoal' : 'text-charcoal-muted/70 hover:text-charcoal'
+                }`}
+              >
+                <span className="font-mono">{'</>'}</span>
+                <span className="tabular-nums">⌘ + ⇧ + E</span>
+              </button>
               <button
                 onClick={() => setCameraOpen(true)}
                 disabled={loading || !skill}
@@ -679,6 +721,61 @@ export default function ExercisePage() {
             </div>
           </div>
         </div>
+      </div>
+      </div>
+      {codeMode && (
+        <div className="w-1/2 flex flex-col min-h-0 min-w-0 border-l border-cream-border">
+          <div className="flex-shrink-0 flex items-center justify-between px-5 pt-5 pb-3 border-b border-cream-border/60">
+            <div className="flex items-center gap-2 text-[12px] text-charcoal-muted">
+              <span className="font-mono">{'</>'}</span>
+              <span>Python</span>
+            </div>
+            <button
+              onClick={() => setCodeMode(false)}
+              title="Close code editor (⌘⇧E)"
+              aria-label="Close code editor"
+              className="text-[11px] text-charcoal-muted/70 hover:text-charcoal transition-colors"
+            >
+              close
+            </button>
+          </div>
+          <div
+            className="flex-1 overflow-auto"
+            onKeyDownCapture={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void sendCode();
+              }
+            }}
+          >
+            <CodeMirror
+              value={code}
+              onChange={(v) => setCode(v)}
+              extensions={[python()]}
+              basicSetup={{ lineNumbers: true, highlightActiveLine: true, foldGutter: false }}
+              placeholder="Write your code here. ⌘+↵ to send."
+              height="100%"
+              style={{ height: '100%', fontSize: '14px' }}
+            />
+          </div>
+          <div className="flex-shrink-0 flex items-center justify-end gap-3 px-5 py-3 border-t border-cream-border/60">
+            <span
+              className={`text-[11px] text-charcoal-muted/60 tabular-nums transition-opacity ${
+                code.trim() ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              ⌘ + ↵
+            </span>
+            <button
+              onClick={() => void sendCode()}
+              disabled={loading || !skill || !code.trim()}
+              className="text-[12px] text-charcoal hover:text-charcoal disabled:opacity-30 disabled:cursor-not-allowed border border-cream-border px-3 py-1 rounded-sm bg-cream-raised/40 hover:bg-cream-raised transition-colors"
+            >
+              Send code
+            </button>
+          </div>
+        </div>
+      )}
       </div>
 
       {peel && (
