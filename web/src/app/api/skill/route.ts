@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurriculum, saveCurriculum } from '@/lib/files';
 import { getSkillName } from '@/lib/algorithm';
+import { deleteActiveChat } from '@/lib/activeChat';
 
 export async function DELETE(req: NextRequest) {
   try {
@@ -16,6 +17,7 @@ export async function DELETE(req: NextRequest) {
       skills: t.skills.filter((s) => getSkillName(s) !== name),
     }));
     saveCurriculum(curriculum);
+    try { deleteActiveChat(name); } catch { /* ignore */ }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

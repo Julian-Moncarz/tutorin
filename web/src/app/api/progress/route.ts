@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProgress, saveProgress, logConversation } from '@/lib/files';
+import { archiveActiveChat } from '@/lib/activeChat';
 import { ChatMessage } from '@/lib/types';
 
 export async function GET() {
@@ -33,6 +34,11 @@ export async function POST(req: NextRequest) {
     });
     saveProgress(progress);
     logConversation(skill, messages, correct);
+    // Once a skill is retired, the in-flight active chat is archived so the
+    // dashboard goes back to "Start" for the next skill.
+    if (correct) {
+      try { archiveActiveChat(skill, true); } catch (err) { console.error('[progress] archive failed', err); }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

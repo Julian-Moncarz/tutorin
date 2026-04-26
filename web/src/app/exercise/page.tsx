@@ -384,6 +384,46 @@ export default function ExercisePage() {
         setInitializing(false);
         return;
       }
+
+      // Resume path: if there's an in-flight chat for this skill on disk,
+      // hydrate the UI from it instead of starting fresh. The server spins
+      // up a `claude -p --resume <id>` subprocess on the very next reply.
+      try {
+        const ar = await fetch(`/api/active-chat?skill=${encodeURIComponent(data.skill)}`);
+        const adata = await ar.json();
+        const active = adata?.active;
+        if (
+          active &&
+          Array.isArray(active.messages) &&
+          active.messages.length > 0 &&
+          active.tutorinSessionId &&
+          active.claudeSessionId
+        ) {
+          abandonFirstQuestionPrefetch();
+          setSkill(data.skill);
+          sessionIdRef.current = active.tutorinSessionId;
+          const hydrated: DisplayMessage[] = active.messages.map(
+            (m: ChatMessage) => ({
+              id: ++messageIdCounter,
+              role: m.role,
+              content: m.content,
+              done: true,
+            })
+          );
+          setMessages(hydrated);
+          for (const m of hydrated) {
+            if (m.role === 'assistant' && isCorrectMessage(m.content)) {
+              retiredLatchedRef.current = true;
+              break;
+            }
+          }
+          setInitializing(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to check for active chat:', err);
+      }
+
       const pf = takeFirstQuestionPrefetch(data.skill);
       if (pf) {
         consumeFirstPrefetch(pf);

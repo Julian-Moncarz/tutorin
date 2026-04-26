@@ -2,7 +2,12 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
 import { getContext, saveStudentPhoto } from '@/lib/files';
-import { deleteSession, getOrCreateSession } from '@/lib/claudeSessions';
+import { deleteSession, getOrCreateSession, hasSession } from '@/lib/claudeSessions';
+import {
+  getActiveChat,
+  appendActiveMessages,
+  saveActiveChat,
+} from '@/lib/activeChat';
 
 const SYSTEM_PROMPT_TEMPLATE = readFileSync(
   path.join(process.cwd(), '..', 'tutor_prompt.md'),
@@ -68,15 +73,68 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { session, isNew } = getOrCreateSession(sessionId, buildSystemPrompt);
+    const active = getActiveChat(skill);
 
-    // message === null  → "start a new session, generate first problem" (isNew must be true)
-    // message !== null  → "student reply in an existing session" (isNew must be false)
-    if (isNew && message !== null) {
-      // Client has a message to send but the server doesn't know this session —
-      // it was swept, the server restarted, or the client hand-rolled a bad id.
-      // Delete the accidental new-session and tell the client to start fresh.
-      console.warn(`[chat] session ${sessionId} not on server but client sent a message — returning 409`);
+    // If the server doesn't already have an in-memory subprocess for this
+    // sessionId, decide whether we can rebuild it via `--resume` against a
+    // persisted active chat, or whether the client needs to start fresh.
+    const serverHasSession = hasSession(sessionId);
+    let resumeId: string | undefined;
+    if (!serverHasSession && message !== null) {
+      // Client wants to continue a chat the server doesn't remember.
+      // Resume only if our active record matches and has a claude session id.
+      if (
+        active &&
+        active.tutorinSessionId === sessionId &&
+        active.claudeSessionId
+      ) {
+        resumeId = active.claudeSessionId;
+      } else {
+        console.warn(`[chat] session ${sessionId} unknown and no resumable record — 409`);
+        deleteSession(sessionId);
+        return new Response(
+          JSON.stringify({ error: 'session expired', code: 'session_expired' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // The onClaudeSessionId callback runs at most once per subprocess (on
+    // the system/init event). We use it to record the claude-internal id so
+    // future processes can `--resume` against the same transcript.
+    const onClaudeSessionId = (claudeId: string) => {
+      try {
+        const cur = getActiveChat(skill);
+        if (cur && cur.tutorinSessionId === sessionId) {
+          if (!cur.claudeSessionId) {
+            saveActiveChat({ ...cur, claudeSessionId: claudeId });
+          }
+        } else if (!cur) {
+          // Fresh begin: seed the active record now so a hard-refresh during
+          // the very first turn can still resume.
+          saveActiveChat({
+            skill,
+            tutorinSessionId: sessionId,
+            claudeSessionId: claudeId,
+            messages: [],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.error('[chat] failed to persist claudeSessionId', err);
+      }
+    };
+
+    const { session, isNew } = getOrCreateSession(
+      sessionId,
+      buildSystemPrompt,
+      { resumeId, onClaudeSessionId }
+    );
+
+    // message === null  → "start a new session, generate first problem"
+    // message !== null  → "student reply"
+    if (isNew && message !== null && !resumeId) {
+      // Shouldn't reach here — covered by the 409 above.
       deleteSession(sessionId);
       return new Response(
         JSON.stringify({ error: 'session expired', code: 'session_expired' }),
@@ -92,8 +150,9 @@ export async function POST(req: NextRequest) {
 
     // Photo only applies to follow-ups — a fresh session has no problem yet
     // for the student to have worked on.
+    const isResumingFresh = isNew && resumeId;
     let photoPath: string | null = null;
-    if (image && !isNew) {
+    if (image && (message !== null || isResumingFresh)) {
       try {
         photoPath = saveStudentPhoto(image);
       } catch (err) {
@@ -103,7 +162,7 @@ export async function POST(req: NextRequest) {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-    } else if (image && isNew) {
+    } else if (image && isNew && !resumeId) {
       console.warn(`[chat] new session ${sessionId} received a photo — ignoring (problem must be generated first)`);
     }
     const photoLine = photoPath
@@ -111,13 +170,22 @@ export async function POST(req: NextRequest) {
       : '';
 
     let userMessage: string;
-    if (isNew) {
+    if (isNew && !resumeId) {
       userMessage = renderTurn1(skill);
     } else {
       userMessage = (message as string) + photoLine;
     }
 
+    // Persist the user-side turn before streaming. For a brand-new "begin"
+    // we don't record the synthetic turn-1 prompt — it's not student-authored.
+    if (message !== null) {
+      appendActiveMessages(skill, sessionId, [
+        { role: 'user', content: photoPath ? `📷 (photo of my work)` : (message as string) },
+      ]);
+    }
+
     const encoder = new TextEncoder();
+    let assistantText = '';
     const stream = new ReadableStream({
       async start(controller) {
         let closed = false;
@@ -132,6 +200,7 @@ export async function POST(req: NextRequest) {
         try {
           await session.send(userMessage, (evt) => {
             if (evt.type === 'text') {
+              assistantText += evt.text;
               safeEnqueue(
                 encoder.encode(`data: ${JSON.stringify({ text: evt.text })}\n\n`)
               );
@@ -149,6 +218,15 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           console.error('[chat] stream error', err);
         } finally {
+          if (assistantText) {
+            try {
+              appendActiveMessages(skill, sessionId, [
+                { role: 'assistant', content: assistantText },
+              ]);
+            } catch (err) {
+              console.error('[chat] failed to persist assistant message', err);
+            }
+          }
           safeEnqueue(encoder.encode('data: [DONE]\n\n'));
           safeClose();
         }
