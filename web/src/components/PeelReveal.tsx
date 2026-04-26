@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { playPeel, playSkillRetired } from '@/lib/audio';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { playPeel, playAnticipation, playRewardFanfare, playDigitTick } from '@/lib/audio';
 
 const LINES = [
   "A small parade has formed in your honor. The mayor is weeping. You're that good.",
@@ -53,39 +53,153 @@ interface Props {
   onRevealed: () => void;
 }
 
+const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the count-up starts
+const ROLL_DURATION_MS = 6000;           // total time to count from before → after, regardless of delta
+const FIREWORKS_DELAY = 80;              // after landing, when fireworks burst
+const BADGE_SLAM_DELAY = 180;            // after landing, when the +percent slams in
+
+type FireworkBurst = {
+  id: number;
+  cx: number; // % of viewport
+  cy: number; // % of viewport
+  color: string;
+  count: number;
+  startMs: number;
+};
+
+const FIREWORK_COLORS = ['#ff5e5e', '#ffce42', '#42c47a', '#5b9eff', '#d56bff', '#ff9450'];
+
 export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Props) {
   const [line] = useState(() => LINES[Math.floor(Math.random() * LINES.length)]);
-  const [displayScore, setDisplayScore] = useState<number>(scoreBefore);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [committed, setCommitted] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
+
+  const beforeStr = String(Math.round(scoreBefore));
+  const afterStr = String(Math.round(scoreAfter));
+  const width = Math.max(beforeStr.length, afterStr.length);
+  const fromStr = beforeStr.padStart(width, ' ');
+  const toStr = afterStr.padStart(width, ' ');
+
+  const beforeNum = Math.round(scoreBefore);
+  const afterNum = Math.round(scoreAfter);
+
+  const [currentValue, setCurrentValue] = useState<number>(beforeNum);
+  const [allLanded, setAllLanded] = useState(false);
+  const [showBadge, setShowBadge] = useState(false);
+  const [bursts, setBursts] = useState<FireworkBurst[]>([]);
+  // Per-digit "just changed" tracking so each tick gets a tiny pop animation.
+  const [bumpKey, setBumpKey] = useState<number[]>(() => fromStr.split('').map(() => 0));
+
   const pointerStartX = useRef(0);
   const pointerId = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    // Fanfare fires immediately. Same one every time.
-    playSkillRetired();
+  const delta = scoreAfter - scoreBefore;
+  const deltaLabel = (Math.round(delta * 10) / 10).toFixed(1);
 
-    // Tween the score number from before → after over ~1.4s.
-    const start = performance.now();
-    const duration = 1400;
+  // Render the current integer as a fixed-width digit row.
+  const currentStr = String(currentValue).padStart(width, ' ');
+  const targetStr = toStr;
+
+  const fireFireworks = useCallback(() => {
+    const now = performance.now();
+    const positions = [
+      { cx: 22, cy: 28 },
+      { cx: 78, cy: 32 },
+      { cx: 50, cy: 16 },
+      { cx: 30, cy: 72 },
+      { cx: 72, cy: 70 },
+      { cx: 50, cy: 48 },
+    ];
+    let id = now;
+    const newBursts: FireworkBurst[] = positions.map((p, i) => ({
+      id: id++,
+      cx: p.cx + (Math.random() - 0.5) * 10,
+      cy: p.cy + (Math.random() - 0.5) * 10,
+      color: FIREWORK_COLORS[i % FIREWORK_COLORS.length],
+      count: 22,
+      startMs: i * 130,
+    }));
+    setBursts(newBursts);
+    setTimeout(() => setBursts([]), 2600);
+  }, []);
+
+  useEffect(() => {
+    // Hold silently on the original value for a beat. Fanfare fires the moment
+    // the count-up starts, so the audio and the visual move together.
+    const fanfareTimer = setTimeout(() => playAnticipation(ROLL_DURATION_MS), PRE_ROLL_HOLD_MS);
+
     let raf = 0;
+    let finalized = false;
+    let lastValue = beforeNum;
+    let rollStartTime = 0;
+
     const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplayScore(scoreBefore + (scoreAfter - scoreBefore) * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
+      if (rollStartTime === 0) {
+        // Wait until the pre-roll hold elapses before starting the tween clock.
+        // performance.now() at mount lives outside this closure; use a ref-like
+        // capture by stamping rollStartTime once.
+        rollStartTime = now + PRE_ROLL_HOLD_MS;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      const elapsed = now - rollStartTime;
+      if (elapsed < 0) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      const t = Math.min(1, elapsed / ROLL_DURATION_MS);
+      // Ease-in quadratic: starts slow, accelerates. Pairs with the
+      // anticipation audio building, and lands the final integer exactly at
+      // t=1 so the celebration fires precisely on the climax. Quadratic (vs
+      // cubic) gets the first tick out the door sooner so the page doesn't
+      // feel stuck on the original number.
+      const eased = t * t;
+      const value = Math.round(beforeNum + (afterNum - beforeNum) * eased);
+
+      if (value !== lastValue) {
+        // Figure out which digit position(s) changed so we can pop them.
+        const prevStr = String(lastValue).padStart(width, ' ');
+        const nextStr = String(value).padStart(width, ' ');
+        const changed: number[] = [];
+        for (let i = 0; i < width; i++) {
+          if (prevStr[i] !== nextStr[i]) changed.push(i);
+        }
+        // Tick sound on the rightmost (ones) changing digit.
+        if (changed.length > 0) playDigitTick(changed[changed.length - 1]);
+        setBumpKey((prev) => prev.map((v, i) => (changed.includes(i) ? v + 1 : v)));
+        setCurrentValue(value);
+        lastValue = value;
+      }
+
+      // Fire the celebration the moment we hit the final number, not when the
+      // tween clock finishes. With ease-out the integer lands well before t=1,
+      // and waiting would leave a dead beat on the final value.
+      if (lastValue >= afterNum && !finalized) {
+        finalized = true;
+        setAllLanded(true);
+        playRewardFanfare();
+        setTimeout(() => fireFireworks(), FIREWORKS_DELAY);
+        setTimeout(() => setShowBadge(true), BADGE_SLAM_DELAY);
+      } else if (t < 1) {
+        raf = requestAnimationFrame(tick);
+      }
     };
     raf = requestAnimationFrame(tick);
 
     const t1 = setTimeout(() => setCelebrate(true), 200);
+
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(t1);
+      clearTimeout(fanfareTimer);
     };
-  }, [scoreBefore, scoreAfter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const commit = useCallback(() => {
     setCommitted((prev) => {
@@ -143,7 +257,6 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
   const dragProgress = Math.min(1, -dragX / 90);
   const cornerLift = 18 + dragProgress * 40;
-  const delta = scoreAfter - scoreBefore;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -159,10 +272,6 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={() => {
-          if (committed) return;
-          if (Math.abs(dragX) < 4) commit();
-        }}
       >
         <div className="h-full w-full flex flex-col items-center justify-center px-6">
           <div className="w-full max-w-md flex flex-col items-center">
@@ -170,18 +279,40 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
               Projected exam score
             </p>
 
-            <div className={`mb-2 ${celebrate ? 'celebrate-pop' : ''}`}>
-              <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none">
-                {Math.round(displayScore)}
+            <div className={`mb-2 flex items-baseline ${celebrate ? 'celebrate-pop' : ''} ${allLanded ? 'score-land-pop' : ''}`}>
+              <span className="text-[88px] font-bold tabular-nums text-charcoal leading-none flex">
+                {currentStr.split('').map((d, i) => (
+                  <span
+                    key={`${i}-${bumpKey[i]}`}
+                    className="slot-digit slot-digit-bump"
+                    style={{
+                      minWidth: d === ' ' ? '0' : '0.62em',
+                      display: 'inline-block',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {d === ' ' ? '' : d}
+                  </span>
+                ))}
               </span>
               <span className="text-[36px] font-semibold text-charcoal-muted">%</span>
             </div>
 
-            {delta > 0 && (
-              <p className="text-[15px] text-green font-semibold tabular-nums mb-10">
-                +{(Math.round(delta * 10) / 10).toFixed(1)} points
-              </p>
-            )}
+            <div className="h-12 mb-10 flex items-center justify-center">
+              {delta > 0 && showBadge && (
+                <div className="badge-slam flex items-baseline gap-1.5 text-green">
+                  <svg width="14" height="16" viewBox="0 0 14 16" className="-mb-0.5" aria-hidden>
+                    <path d="M7 2L7 14M7 2L2 7M7 2L12 7" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-[22px] font-bold tabular-nums tracking-tight">
+                    +{deltaLabel}
+                  </span>
+                  <span className="text-[14px] uppercase tracking-[0.16em] font-semibold opacity-80 ml-1">
+                    percent
+                  </span>
+                </div>
+              )}
+            </div>
 
             <p className="text-center text-[17px] text-charcoal leading-relaxed max-w-sm">
               {line}
@@ -214,7 +345,69 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
             filter: 'drop-shadow(-2px -2px 6px rgba(0,0,0,0.08))',
           }}
         />
+
+        {/* Fireworks layer */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {bursts.map((b) => (
+            <FireworkBurstView key={b.id} burst={b} />
+          ))}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function FireworkBurstView({ burst }: { burst: FireworkBurst }) {
+  const particles = useMemo(() => {
+    const out: { i: number; px: number; py: number; size: number; life: number }[] = [];
+    for (let i = 0; i < burst.count; i++) {
+      const angle = (i / burst.count) * Math.PI * 2 + Math.random() * 0.25;
+      const dist = 130 + Math.random() * 110;
+      out.push({
+        i,
+        px: Math.cos(angle) * dist,
+        py: Math.sin(angle) * dist,
+        size: 6 + Math.random() * 6,
+        life: 1100 + Math.random() * 600,
+      });
+    }
+    return out;
+  }, [burst.count]);
+
+  return (
+    <div
+      className="absolute"
+      style={{
+        left: `${burst.cx}%`,
+        top: `${burst.cy}%`,
+      }}
+    >
+      <span
+        className="firework-flash"
+        style={{
+          background: burst.color,
+          color: burst.color,
+          animationDelay: `${burst.startMs}ms`,
+        }}
+      />
+      {particles.map((p) => (
+        <span
+          key={p.i}
+          className="firework-particle"
+          style={
+            {
+              ['--px' as string]: `${p.px}px`,
+              ['--py' as string]: `${p.py}px`,
+              ['--life' as string]: `${p.life}ms`,
+              ['--delay' as string]: `${burst.startMs}ms`,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              background: burst.color,
+              color: burst.color,
+            } as React.CSSProperties
+          }
+        />
+      ))}
     </div>
   );
 }
