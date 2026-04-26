@@ -46,15 +46,8 @@ export interface NextSkillRecommendation {
   skill: string;
 }
 
-export interface WeakSpot {
-  skill: string;
-  pCorrect: number;
-}
-
 export interface ExamReadinessSummary {
-  estimatedScoreLow: number;
-  estimatedScoreHigh: number;
+  estimatedScore: number;
   alreadyKnownPct: number;
   readiness: number;
-  biggestGains: WeakSpot[];
 }
