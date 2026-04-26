@@ -54,7 +54,7 @@ interface Props {
 }
 
 const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the count-up starts
-const ROLL_DURATION_MS = 7000;           // total time to count from before → after, regardless of delta
+const ROLL_DURATION_MS = 6000;           // total time to count from before → after, regardless of delta
 const FIREWORKS_DELAY = 80;              // after landing, when fireworks burst
 const BADGE_SLAM_DELAY = 180;            // after landing, when the +percent slams in
 

@@ -169,15 +169,15 @@ export function playAnticipation(durationMs = 2200): void {
   const drumGain = ac.createGain();
   // Build crescendo: starts soft, swells throughout.
   drumGain.gain.setValueAtTime(0.0, now);
-  drumGain.gain.linearRampToValueAtTime(0.08, now + 0.15);
-  drumGain.gain.linearRampToValueAtTime(0.18, now + dur * 0.5);
-  drumGain.gain.linearRampToValueAtTime(0.42, now + dur);
+  drumGain.gain.linearRampToValueAtTime(0.04, now + 0.15);
+  drumGain.gain.linearRampToValueAtTime(0.09, now + dur * 0.5);
+  drumGain.gain.linearRampToValueAtTime(0.22, now + dur);
   // LFO tremolo for "rolling" feel
   const lfo = ac.createOscillator();
   lfo.type = 'sine';
   lfo.frequency.value = 14;
   const lfoGain = ac.createGain();
-  lfoGain.gain.value = 0.16;
+  lfoGain.gain.value = 0.08;
   lfo.connect(lfoGain).connect(drumGain.gain);
   drumRoll.connect(drumFilter).connect(drumGain).connect(ac.destination);
   drumRoll.start(now);
@@ -196,8 +196,8 @@ export function playAnticipation(durationMs = 2200): void {
   pf.frequency.linearRampToValueAtTime(2400, now + dur);
   const pg = ac.createGain();
   pg.gain.setValueAtTime(0.0, now);
-  pg.gain.linearRampToValueAtTime(0.04, now + 0.2);
-  pg.gain.linearRampToValueAtTime(0.13, now + dur);
+  pg.gain.linearRampToValueAtTime(0.02, now + 0.2);
+  pg.gain.linearRampToValueAtTime(0.07, now + dur);
   pad1.connect(pf).connect(pg).connect(ac.destination);
   pad1.start(now);
   pad1.stop(now + dur + 0.05);
@@ -208,8 +208,8 @@ export function playAnticipation(durationMs = 2200): void {
   pad2.frequency.exponentialRampToValueAtTime(261.63, now + dur);   // C4
   const pg2 = ac.createGain();
   pg2.gain.setValueAtTime(0.0, now);
-  pg2.gain.linearRampToValueAtTime(0.03, now + 0.2);
-  pg2.gain.linearRampToValueAtTime(0.1, now + dur);
+  pg2.gain.linearRampToValueAtTime(0.015, now + 0.2);
+  pg2.gain.linearRampToValueAtTime(0.055, now + dur);
   pad2.connect(pf).connect(pg2).connect(ac.destination);
   pad2.start(now);
   pad2.stop(now + dur + 0.05);
@@ -224,8 +224,8 @@ export function playAnticipation(durationMs = 2200): void {
   wf.frequency.exponentialRampToValueAtTime(7000, now + dur);
   const wg = ac.createGain();
   wg.gain.setValueAtTime(0.0, now);
-  wg.gain.linearRampToValueAtTime(0.05, now + 0.3);
-  wg.gain.linearRampToValueAtTime(0.18, now + dur);
+  wg.gain.linearRampToValueAtTime(0.025, now + 0.3);
+  wg.gain.linearRampToValueAtTime(0.1, now + dur);
   whoosh.connect(wf).connect(wg).connect(ac.destination);
   whoosh.start(now);
   whoosh.stop(now + dur + 0.05);
