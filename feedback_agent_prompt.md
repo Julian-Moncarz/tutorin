@@ -465,7 +465,7 @@ gh pr merge --repo {{repo}} --merge --delete-branch "$PR_URL"
 cd {{repoRoot}}
 git fetch origin main
 DANGER=$(git diff --name-only HEAD..origin/main | grep -E \
-  '^(package(-lock)?\.json|web/next\.config\.|web/\.env|web/tsconfig\.json|web/middleware\.|web/instrumentation\.)' \
+  '^web/(package(-lock)?\.json|next\.config\.|\.env|tsconfig\.json|middleware\.|instrumentation\.)' \
   || true)
 
 if [ -n "$DANGER" ]; then
