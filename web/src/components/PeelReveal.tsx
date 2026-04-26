@@ -53,6 +53,7 @@ interface Props {
   onRevealed: () => void;
 }
 
+const PRE_ROLL_HOLD_MS = 500;            // hold on the original value before the slot roll starts
 const PER_DIGIT_LANDING_DELAY = 380;     // each digit lands this much after the previous one
 const TICK_INTERVAL_MS = 55;             // how often we cycle digits during the roll
 const FIREWORKS_DELAY = 80;              // after final digit lands, when fireworks burst
@@ -84,6 +85,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
   const [rollingDigits, setRollingDigits] = useState<string[]>(() => fromStr.split(''));
   const [landed, setLanded] = useState<boolean[]>(() => fromStr.split('').map(() => false));
+  const [rollStarted, setRollStarted] = useState(false);
   const [allLanded, setAllLanded] = useState(false);
   const [showBadge, setShowBadge] = useState(false);
   const [bursts, setBursts] = useState<FireworkBurst[]>([]);
@@ -96,7 +98,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
   const deltaLabel = (Math.round(delta * 10) / 10).toFixed(1);
 
   const landingTimes = useMemo(() => {
-    return fromStr.split('').map((_, i) => (i + 1) * PER_DIGIT_LANDING_DELAY + 250);
+    return fromStr.split('').map((_, i) => PRE_ROLL_HOLD_MS + (i + 1) * PER_DIGIT_LANDING_DELAY);
   }, [fromStr]);
 
   const fireFireworks = useCallback(() => {
@@ -146,6 +148,13 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
           if (targets[ix] !== ' ') playDigitTick(ix);
         }
       }
+
+      // Pre-roll hold: show the original value until the hold elapses.
+      if (elapsed < PRE_ROLL_HOLD_MS) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      if (!rollStarted) setRollStarted(true);
 
       if (now - lastTick >= TICK_INTERVAL_MS) {
         lastTick = now;
@@ -263,7 +272,7 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
                 {rollingDigits.map((d, i) => (
                   <span
                     key={i}
-                    className={`slot-digit ${landed[i] ? 'slot-digit-landed' : 'slot-digit-rolling'}`}
+                    className={`slot-digit ${landed[i] ? 'slot-digit-landed' : rollStarted ? 'slot-digit-rolling' : ''}`}
                     style={{
                       minWidth: d === ' ' ? '0' : '0.62em',
                       display: 'inline-block',
@@ -279,9 +288,15 @@ export default function PeelReveal({ scoreBefore, scoreAfter, onRevealed }: Prop
 
             <div className="h-12 mb-10 flex items-center justify-center">
               {delta > 0 && showBadge && (
-                <div className="badge-slam">
-                  <span className="inline-block px-5 py-2 rounded-full bg-green text-cream text-[20px] font-bold tabular-nums shadow-lg">
-                    +{deltaLabel} points
+                <div className="badge-slam flex items-baseline gap-1.5 text-green">
+                  <svg width="14" height="16" viewBox="0 0 14 16" className="-mb-0.5" aria-hidden>
+                    <path d="M7 2L7 14M7 2L2 7M7 2L12 7" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-[22px] font-bold tabular-nums tracking-tight">
+                    +{deltaLabel}
+                  </span>
+                  <span className="text-[14px] uppercase tracking-[0.16em] font-semibold opacity-80 ml-1">
+                    points
                   </span>
                 </div>
               )}
