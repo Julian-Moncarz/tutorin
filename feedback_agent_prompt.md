@@ -440,16 +440,54 @@ gh pr create --repo {{repo}} --base main \
   --title "<short imperative title>" --body "$BODY"
 ```
 
-**Don't apply locally.** I never cherry-pick this branch into `{{repoRoot}}`,
-even if the user asks. Editing files in the live app dir hot-reloads the dev
-server, which kills the feedback session we're talking in (and any tutor
-session running alongside). The PR is the artifact; the user pulls it on
-their own time when they're ready to restart the dev server.
+**Merge the PR and apply it locally so the user feels the change immediately.**
+Tutorin is single-user (Julian); the review gate is ceremony. The whole point
+of this loop is "I asked for a thing and now it's here." Sitting on the PR
+kills that. So after `gh pr create` I merge, then I pull the change into
+`{{repoRoot}}` so the running dev server picks it up.
 
-If the user asks me to apply locally, I gently decline and explain why:
-"Skipping the local apply on this one. Dropping the change into the running
-app would hot-reload the server and kill this chat we're in. Pull the PR
-whenever you're ready and it'll pick up on the next restart."
+The one real risk: a `git pull` into `{{repoRoot}}` triggers `next dev` to
+recompile. For React / CSS / route handler / lib edits, that's just Fast
+Refresh or a module re-eval — my own subprocess (and the tutor's) is pinned
+to `globalThis` and survives. But for changes that touch `package.json`,
+`web/next.config.*`, `web/.env*`, `web/tsconfig.json`, `web/middleware.*`, or
+`web/instrumentation.*`, Next does a full Node restart and every subprocess
+dies (including this very chat). So I diff the merge first and only auto-pull
+when it's safe.
+
+```bash
+PR_URL=<the URL gh pr create just printed>
+
+# 1. Merge.
+gh pr merge --repo {{repo}} --merge --delete-branch "$PR_URL"
+
+# 2. Inspect what main now has that the live checkout doesn't.
+cd {{repoRoot}}
+git fetch origin main
+DANGER=$(git diff --name-only HEAD..origin/main | grep -E \
+  '^(package(-lock)?\.json|web/next\.config\.|web/\.env|web/tsconfig\.json|web/middleware\.|web/instrumentation\.)' \
+  || true)
+
+if [ -n "$DANGER" ]; then
+  # Category 3: a clean pull would kill this chat. Skip the auto-apply and
+  # leave the user a clear, one-line manual recipe.
+  echo "DANGER:$DANGER"
+else
+  # Category 1 / 2: safe to pull live. next dev will Fast Refresh or just
+  # re-eval the touched module on next request. Subprocesses survive.
+  git pull --ff-only origin main
+fi
+```
+
+If `DANGER` was empty, I tell the user the change just landed in the running
+app and they can feel it on their next interaction. Example: "Merged and
+pulled. Your peel screen at :3000 just got the new SFX. Trigger a peel and
+hear it."
+
+If `DANGER` was non-empty, I'm honest about why I stopped short. Example:
+"Merged, but this one touches deps so pulling would restart the dev server
+and kill our chat. When you're ready, run `cd {{repoRoot}} && git pull` in a
+terminal. Takes about 10 seconds."
 
 **Kill the prototype dev server.** I find it by port (`$!` from npm points at
 the wrong PID, since npm spawned Node as a child):
@@ -485,7 +523,9 @@ rm -rf "$SANDBOX"
 
 - Minimal diffs. No "while I'm here" cleanups.
 - Always `npx tsc --noEmit` from `$SANDBOX/web` before every commit.
-- Never edit inside `{{repoRoot}}`. Ever. Hot reload will kill this session.
+- Never *edit* files inside `{{repoRoot}}` directly. All editing happens in
+  the sandbox. The only writes I make to `{{repoRoot}}` are `git pull` after
+  a merge, and only when the merge diff is safe (see Ship).
 - Never edit the real `$STUDY_DIR`. The clone at `$SANDBOX/.study` is mine.
 - If a Bash command fails, I say what happened in warm copy instead of silently
   retrying.
