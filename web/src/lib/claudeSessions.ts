@@ -4,6 +4,15 @@ const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 
 export interface SessionOptions {
   turnTimeoutMs?: number;
+  // If set, the subprocess is started with `--resume <id>` so it picks up
+  // the existing claude-code transcript instead of starting fresh. The
+  // system prompt baked into the original session is reused; we don't pass
+  // --system-prompt on resume.
+  resumeId?: string;
+  // Fired once when the stream-json `system` init event arrives, carrying
+  // the claude-internal session id. Use it to persist the id so a future
+  // process can `--resume` against this transcript.
+  onClaudeSessionId?: (id: string) => void;
 }
 
 export type StdoutEvent =
@@ -65,15 +74,17 @@ export class ClaudeSession {
   ) {}
 
   private start() {
-    const args = [
+    const baseArgs = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--effort', 'medium',
-      '--system-prompt', this.systemPrompt,
       '--dangerously-skip-permissions',
     ];
+    const args = this.options.resumeId
+      ? ['--resume', this.options.resumeId, ...baseArgs]
+      : ['--system-prompt', this.systemPrompt, ...baseArgs];
     const proc = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
     this.buf = '';
@@ -121,6 +132,8 @@ export class ClaudeSession {
     if (!data || typeof data !== 'object') return;
     const d = data as {
       type?: string;
+      subtype?: string;
+      session_id?: string;
       message?: {
         role?: string;
         content?: Array<{
@@ -136,6 +149,11 @@ export class ClaudeSession {
       result?: string;
       is_error?: boolean;
     };
+
+    if (d.type === 'system' && d.subtype === 'init' && d.session_id) {
+      try { this.options.onClaudeSessionId?.(d.session_id); } catch { /* ignore */ }
+      return;
+    }
 
     if (d.type === 'assistant' && d.message?.content) {
       for (const block of d.message.content) {
@@ -261,10 +279,14 @@ export function getOrCreateSession(
   let s = sessions.get(id);
   const isNew = !s;
   if (!s) {
-    s = new ClaudeSession(buildSystemPrompt(), options);
+    s = new ClaudeSession(buildSystemPrompt(), options ?? {});
     sessions.set(id, s);
   }
   return { session: s, isNew };
+}
+
+export function hasSession(id: string): boolean {
+  return sessions.has(id);
 }
 
 export function deleteSession(id: string) {

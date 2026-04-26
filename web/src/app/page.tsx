@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [nextUp, setNextUp] = useState<NextSkillRecommendation | null>(null);
   const [readiness, setReadiness] = useState<ExamReadinessSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resumable, setResumable] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -32,13 +33,28 @@ export default function Dashboard() {
       fetch('/api/next-skill').then((r) => r.json()),
       fetch('/api/readiness').then((r) => r.json()),
     ])
-      .then(([c, p, n, readinessData]) => {
+      .then(async ([c, p, n, readinessData]) => {
         if (c.error) setError(c.error);
         else setCurriculum(c);
         setProgress(p);
         if (n && !n.done && n.skill) {
           setNextUp(n);
-          startFirstQuestionPrefetch(n.skill);
+          // If there's an in-flight chat for this skill on disk, the CTA
+          // becomes "Resume" and we skip the prefetch (we'd be creating a
+          // second session for the same skill, which would just get
+          // discarded when the exercise page hydrates from disk).
+          let hasActive = false;
+          try {
+            const r = await fetch(`/api/active-chat?skill=${encodeURIComponent(n.skill)}`);
+            const data = await r.json();
+            hasActive = !!(
+              data?.active &&
+              Array.isArray(data.active.messages) &&
+              data.active.messages.length > 0
+            );
+          } catch { /* ignore — fall through to fresh-start prefetch */ }
+          setResumable(hasActive);
+          if (!hasActive) startFirstQuestionPrefetch(n.skill);
         }
         if (!readinessData?.error) setReadiness(readinessData);
       })
@@ -77,7 +93,7 @@ export default function Dashboard() {
         {nextUp && (
           <div className="mb-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-charcoal-muted font-medium mb-1.5">
-              Next up
+              {resumable ? 'In progress' : 'Next up'}
             </p>
             <p className="text-[15px] text-charcoal-secondary leading-snug">
               {nextUp.skill}
@@ -88,7 +104,7 @@ export default function Dashboard() {
           onClick={() => router.push('/exercise')}
           className="mt-4 inline-flex items-center gap-2 px-7 py-3.5 bg-green text-white text-[15px] font-semibold hover:bg-green-hover active:scale-[0.98] transition-all shadow-sm hover:shadow"
         >
-          Start
+          {resumable ? 'Resume' : 'Start'}
           <span aria-hidden>→</span>
         </button>
       </div>
